@@ -15,6 +15,8 @@ struct SetLoopApp: App {
             [
                 "setloop.mock.accounts",
                 "setloop.mock.current_user_id",
+                "setloop.mock.gigs",
+                "setloop.mock.venues",
                 "setloop.mock.applications",
                 "setloop.mock.notifications"
             ].forEach { userDefaults.removeObject(forKey: $0) }

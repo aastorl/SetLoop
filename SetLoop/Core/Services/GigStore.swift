@@ -5,23 +5,33 @@ import Combine
 final class GigStore: ObservableObject {
     private let gigsKey = "setloop.mock.gigs"
     private let userDefaults: UserDefaults
+    private let remoteService: VenueGigRemoteServicing?
     private let encoder = JSONEncoder.supabase
     private let decoder = JSONDecoder.supabase
 
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+
     @Published private(set) var gigs: [Gig] {
         didSet {
-            persistGigs()
+            if remoteService == nil {
+                persistGigs()
+            }
         }
     }
 
     init(
         userDefaults: UserDefaults = .standard,
-        seedGigs: [Gig]? = nil
+        seedGigs: [Gig]? = nil,
+        remoteService: VenueGigRemoteServicing? = nil
     ) {
         self.userDefaults = userDefaults
+        self.remoteService = remoteService
         let resolvedSeedGigs = seedGigs ?? MockExploreData.gigs
 
-        if let persistedGigs = Self.loadPersistedGigs(from: userDefaults, using: decoder) {
+        if remoteService != nil {
+            self.gigs = []
+        } else if let persistedGigs = Self.loadPersistedGigs(from: userDefaults, using: decoder) {
             self.gigs = persistedGigs
         } else {
             self.gigs = resolvedSeedGigs.sorted { $0.performanceDate < $1.performanceDate }
@@ -44,6 +54,47 @@ final class GigStore: ObservableObject {
             .sorted { $0.performanceDate < $1.performanceDate }
     }
 
+    func loadAll() async throws {
+        guard let remoteService else {
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            gigs = try await remoteService.fetchGigs()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
+    }
+
+    func loadGigs(for hostUserID: UUID) async throws {
+        guard let remoteService else {
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let hostGigs = try await remoteService.fetchGigs(hostUserID: hostUserID)
+            let hostGigIDs = Set(hostGigs.map(\.id))
+            gigs.removeAll { $0.hostUserID == hostUserID && hostGigIDs.contains($0.id) == false }
+
+            for gig in hostGigs {
+                upsert(gig)
+            }
+
+            errorMessage = nil
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
+    }
+
     @discardableResult
     func upsert(_ gig: Gig) -> Gig {
         if let existingIndex = gigs.firstIndex(where: { $0.id == gig.id }) {
@@ -54,6 +105,23 @@ final class GigStore: ObservableObject {
 
         gigs.sort { $0.performanceDate < $1.performanceDate }
         return gig
+    }
+
+    @discardableResult
+    func save(_ gig: Gig) async throws -> Gig {
+        guard let remoteService else {
+            return upsert(gig)
+        }
+
+        do {
+            let savedGig = try await remoteService.saveGig(gig)
+            errorMessage = nil
+            upsert(savedGig)
+            return savedGig
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
     }
 
     @discardableResult
@@ -70,6 +138,23 @@ final class GigStore: ObservableObject {
         gigs[index].updatedAt = Date()
         gigs.sort { $0.performanceDate < $1.performanceDate }
         return gigs.first { $0.id == gigID }
+    }
+
+    @discardableResult
+    func saveStatus(gigID: UUID, status: GigStatus) async throws -> Gig? {
+        guard let remoteService else {
+            return updateStatus(gigID: gigID, status: status)
+        }
+
+        do {
+            let updatedGig = try await remoteService.updateGigStatus(gigID: gigID, status: status)
+            errorMessage = nil
+            upsert(updatedGig)
+            return updatedGig
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
     }
 
     func syncHostedGigMetadata(using profile: UserProfile, venue: Venue?) {

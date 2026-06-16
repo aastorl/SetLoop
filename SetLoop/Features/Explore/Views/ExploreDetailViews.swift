@@ -49,7 +49,9 @@ struct GigDetailView: View {
                 gigTitle: viewModel.gig.title,
                 message: $message
             ) {
-                viewModel.requestContact(message: message)
+                Task {
+                    await viewModel.requestContact(message: message)
+                }
             }
         }
     }
@@ -59,7 +61,7 @@ struct GigDetailView: View {
             if let application = viewModel.application {
                 Label("Solicitud \(application.status.displayName.lowercased())", systemImage: "checkmark.circle.fill")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.green)
+                    .foregroundStyle(application.status.tint)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -67,6 +69,9 @@ struct GigDetailView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            } else if viewModel.isSubmitting {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 Button {
                     message = "Hola, me interesa esta fecha. Puedo compartir repertorio, disponibilidad y material reciente."
@@ -79,6 +84,13 @@ struct GigDetailView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .disabled(!viewModel.canRequestContact)
+            }
+
+            if let errorMessage = viewModel.errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(14)
@@ -132,125 +144,12 @@ struct VenueDetailView: View {
     }
 }
 
-struct MusicianDetailView: View {
-    @StateObject private var viewModel: MusicianDetailViewModel
-    @State private var showsInviteSheet = false
-    @State private var inviteMessage = ""
-
-    init(viewModel: MusicianDetailViewModel) {
-        _viewModel = StateObject(wrappedValue: viewModel)
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                DetailHeroView(
-                    symbolName: "person.crop.square",
-                    badge: viewModel.premiumText,
-                    title: viewModel.musician.displayName,
-                    subtitle: viewModel.profileTypeText,
-                    city: viewModel.musician.city
-                )
-
-                TagRow(tags: viewModel.tags)
-
-                DetailSection(title: "Bio") {
-                    Text(viewModel.musician.bio ?? "Perfil profesional disponible para fechas, colaboraciones y programacion.")
-                        .font(.body)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                DetailSection(title: "Datos clave") {
-                    KeyValueRow(label: "Ciudad", value: viewModel.musician.city)
-                    KeyValueRow(label: "Perfil", value: viewModel.profileTypeText)
-                    if viewModel.musician.role == .musician {
-                        KeyValueRow(label: "Formacion", value: viewModel.formationsText)
-                    }
-                    KeyValueRow(label: viewModel.detailsLabel, value: viewModel.detailsText)
-                    KeyValueRow(label: "Cuenta", value: viewModel.premiumText)
-                }
-
-                if viewModel.shouldShowInviteSection {
-                    inviteSection
-                }
-
-                ReviewSectionView(
-                    summary: viewModel.reviewSummary,
-                    reviews: viewModel.reviews
-                )
-            }
-            .padding(16)
-        }
-        .navigationTitle("Perfil")
-        .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showsInviteSheet) {
-            InviteTalentSheet(
-                talentName: viewModel.musician.displayName,
-                gigs: viewModel.availableGigs,
-                message: $inviteMessage
-            ) { gigID in
-                viewModel.sendInvite(gigID: gigID, message: inviteMessage)
-            }
-        }
-    }
-
-    private var inviteSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Invitaciones")
-                .font(.headline)
-
-            Text(viewModel.inviteHelperText)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if viewModel.inviteSummaries.isEmpty == false {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(viewModel.inviteSummaries) { summary in
-                        HStack(spacing: 8) {
-                            Text(summary.gigTitle)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-
-                            Spacer(minLength: 8)
-
-                            Text(summary.status.displayName)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(summary.status.tint)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(summary.status.tint.opacity(0.12))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
-                    }
-                }
-            }
-
-            if viewModel.canInviteTalent {
-                Button {
-                    inviteMessage = viewModel.defaultInviteMessage(for: viewModel.availableGigs.first)
-                    showsInviteSheet = true
-                } label: {
-                    Label(viewModel.inviteButtonTitle, systemImage: "paperplane.fill")
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-            }
-        }
-        .padding(14)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-}
-
 struct MissingDetailView: View {
     var body: some View {
         ContentUnavailableView(
             "Detalle no disponible",
             systemImage: "exclamationmark.magnifyingglass",
-            description: Text("No se encontro el contenido seleccionado en los datos demo.")
+            description: Text("No se encontro el contenido seleccionado.")
         )
         .navigationTitle("Detalle")
     }
@@ -299,97 +198,6 @@ private struct ContactRequestSheet: View {
                         dismiss()
                     }
                     .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
-}
-
-private struct InviteTalentSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let talentName: String
-    let gigs: [Gig]
-    @Binding var message: String
-    let onSubmit: (UUID) -> Void
-    @State private var selectedGigID: UUID
-
-    init(
-        talentName: String,
-        gigs: [Gig],
-        message: Binding<String>,
-        onSubmit: @escaping (UUID) -> Void
-    ) {
-        self.talentName = talentName
-        self.gigs = gigs
-        self._message = message
-        self.onSubmit = onSubmit
-        self._selectedGigID = State(initialValue: gigs.first?.id ?? UUID())
-    }
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(talentName)
-                    .font(.headline)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Fecha")
-                        .font(.subheadline.weight(.semibold))
-
-                    Picker("Fecha", selection: $selectedGigID) {
-                        ForEach(gigs) { gig in
-                            Text(gig.title).tag(gig.id)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: 44)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-
-                if let selectedGig = gigs.first(where: { $0.id == selectedGigID }) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label(selectedGig.city, systemImage: "mappin.and.ellipse")
-                        Label(selectedGig.performanceDate.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Mensaje")
-                        .font(.subheadline.weight(.semibold))
-
-                    TextEditor(text: $message)
-                        .frame(minHeight: 160)
-                        .padding(8)
-                        .scrollContentBackground(.hidden)
-                        .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-
-                Spacer()
-            }
-            .padding(16)
-            .navigationTitle("Invitar a fecha")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancelar") {
-                        dismiss()
-                    }
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enviar") {
-                        onSubmit(selectedGigID)
-                        dismiss()
-                    }
-                    .disabled(gigs.isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }

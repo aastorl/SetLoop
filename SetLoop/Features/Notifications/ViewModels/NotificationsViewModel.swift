@@ -5,6 +5,8 @@ import Combine
 final class NotificationsViewModel: ObservableObject {
     @Published private(set) var items: [NotificationItem] = []
     @Published private(set) var unreadCount = 0
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
 
     private let currentProfile: UserProfile
     private let notificationStore: NotificationStore
@@ -29,9 +31,9 @@ final class NotificationsViewModel: ObservableObject {
     var emptyStateDescription: String {
         switch currentProfile.role {
         case .venue:
-            return "Las nuevas candidaturas, invitaciones y cambios clave en tus fechas apareceran aqui."
+            return "Las nuevas candidaturas y cambios clave en tus fechas apareceran aqui."
         case .musician, .dj:
-            return "Las respuestas a tus solicitudes, invitaciones y novedades importantes apareceran aqui."
+            return "Las respuestas a tus candidaturas y novedades importantes apareceran aqui."
         }
     }
 
@@ -39,12 +41,73 @@ final class NotificationsViewModel: ObservableObject {
         unreadCount > 0
     }
 
+    func load() async {
+        guard notificationStore.usesRemoteService else {
+            reload()
+            return
+        }
+
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        do {
+            try await notificationStore.load(for: currentProfile.id)
+            errorMessage = nil
+            reload()
+        } catch {
+            errorMessage = error.setLoopUserMessage
+        }
+    }
+
     func markAsRead(_ item: NotificationItem) {
+        guard notificationStore.usesRemoteService == false else {
+            Task {
+                await markAsReadAsync(item)
+            }
+            return
+        }
+
         notificationStore.markAsRead(item.id)
     }
 
     func markAllAsRead() {
+        guard notificationStore.usesRemoteService == false else {
+            Task {
+                await markAllAsReadAsync()
+            }
+            return
+        }
+
         notificationStore.markAllAsRead(for: currentProfile.id)
+    }
+
+    func markAsReadAsync(_ item: NotificationItem) async {
+        guard item.isRead == false else {
+            return
+        }
+
+        do {
+            try await notificationStore.saveMarkAsRead(item.id)
+            errorMessage = nil
+            reload()
+        } catch {
+            errorMessage = error.setLoopUserMessage
+        }
+    }
+
+    func markAllAsReadAsync() async {
+        guard unreadCount > 0 else {
+            return
+        }
+
+        do {
+            try await notificationStore.saveMarkAllAsRead(for: currentProfile.id)
+            errorMessage = nil
+            reload()
+        } catch {
+            errorMessage = error.setLoopUserMessage
+        }
     }
 
     private func reload() {

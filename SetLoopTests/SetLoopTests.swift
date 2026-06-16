@@ -97,79 +97,6 @@ struct SetLoopTests {
     }
 
     @MainActor
-    @Test func inviteStoreCreatesInviteAndNotifications() {
-        let suiteName = "SetLoopTests.InviteStore.\(UUID().uuidString)"
-        let userDefaults = UserDefaults(suiteName: suiteName)!
-        userDefaults.removePersistentDomain(forName: suiteName)
-
-        let hostProfile = UserProfile(
-            id: UUID(),
-            email: "venue@setloop.local",
-            displayName: "Sala Demo",
-            role: .venue,
-            city: "Madrid",
-            bio: "Local demo",
-            genres: ["Indie"],
-            instruments: ["House"],
-            venueCapacity: 180
-        )
-        let talentProfile = UserProfile(
-            id: UUID(),
-            email: "artist@setloop.local",
-            displayName: "Artista Demo",
-            role: .musician,
-            city: "Madrid",
-            bio: "Proyecto en directo",
-            genres: ["Indie"],
-            instruments: ["Solista", "Voz"]
-        )
-        let gig = Gig(
-            id: UUID(),
-            venueID: nil,
-            hostUserID: hostProfile.id,
-            title: "Fecha indie",
-            venueName: hostProfile.displayName,
-            city: "Madrid",
-            performanceDate: Date(),
-            durationMinutes: 60,
-            budgetMin: 250,
-            budgetMax: 400,
-            currency: "EUR",
-            roleNeeded: .musician,
-            requiredGenres: ["Indie"],
-            description: nil,
-            status: .open,
-            imageURL: nil,
-            createdAt: Date(),
-            updatedAt: Date()
-        )
-
-        let gigStore = GigStore(userDefaults: userDefaults, seedGigs: [gig])
-        let notificationStore = NotificationStore(userDefaults: userDefaults)
-        let inviteStore = InviteStore(
-            gigStore: gigStore,
-            notificationStore: notificationStore,
-            userDefaults: userDefaults
-        )
-
-        let invite = inviteStore.createInvite(
-            gigID: gig.id,
-            hostProfile: hostProfile,
-            talentProfile: talentProfile,
-            message: "Nos interesa tu proyecto para esta fecha."
-        )
-
-        #expect(invite != nil)
-        #expect(inviteStore.receivedInvites(for: talentProfile.id).count == 1)
-        #expect(notificationStore.notifications(for: talentProfile.id).first?.type == .inviteReceived)
-
-        _ = inviteStore.updateStatus(inviteID: invite!.id, status: .accepted)
-
-        #expect(inviteStore.sentInvites(for: hostProfile.id).first?.status == .accepted)
-        #expect(notificationStore.notifications(for: hostProfile.id).first?.type == .inviteAccepted)
-    }
-
-    @MainActor
     @Test func venueStoreSyncsVenueFromProfile() {
         let suiteName = "SetLoopTests.VenueStore.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
@@ -200,7 +127,7 @@ struct SetLoopTests {
     }
 
     @MainActor
-    @Test func acceptingAnInviteClosesGigAndRejectsOtherPendingItems() {
+    @Test func acceptingAnApplicationClosesGigAndRejectsOtherPendingApplications() {
         let suiteName = "SetLoopTests.BookingClosure.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
         userDefaults.removePersistentDomain(forName: suiteName)
@@ -217,7 +144,7 @@ struct SetLoopTests {
             instruments: ["House"],
             venueCapacity: 180
         )
-        let invitedTalent = UserProfile(
+        let acceptedApplicant = UserProfile(
             id: UUID(),
             email: "dj-accepted@setloop.local",
             displayName: "DJ A",
@@ -227,7 +154,7 @@ struct SetLoopTests {
             genres: [],
             instruments: ["Club Set"]
         )
-        let otherTalent = UserProfile(
+        let otherApplicant = UserProfile(
             id: UUID(),
             email: "dj-rejected@setloop.local",
             displayName: "DJ B",
@@ -265,40 +192,220 @@ struct SetLoopTests {
             notificationStore: notificationStore,
             userDefaults: userDefaults
         )
-        let inviteStore = InviteStore(
-            gigStore: gigStore,
-            notificationStore: notificationStore,
-            userDefaults: userDefaults
-        )
 
-        let pendingApplication = applicationStore.createApplication(
+        let acceptedApplication = applicationStore.createApplication(
             gigID: gig.id,
-            applicantProfile: otherTalent,
+            applicantProfile: acceptedApplicant,
+            message: "Disponible para esta fecha."
+        )
+        let rejectedApplication = applicationStore.createApplication(
+            gigID: gig.id,
+            applicantProfile: otherApplicant,
             message: "Me interesa esta fecha."
         )
-        let invite = inviteStore.createInvite(
-            gigID: gig.id,
-            hostProfile: hostProfile,
-            talentProfile: invitedTalent,
-            message: "Queremos contar contigo."
-        )!
 
         let bookingViewModel = BookingViewModel(
             applicationStore: applicationStore,
-            inviteStore: inviteStore,
-            currentProfile: invitedTalent,
+            currentProfile: hostProfile,
             gigStore: gigStore
         )
 
-        let receivedInvite = bookingViewModel.sections
+        let receivedApplication = bookingViewModel.sections
             .flatMap(\.items)
-            .first { $0.id == invite.id }!
+            .first { $0.id == acceptedApplication.id }!
 
-        bookingViewModel.accept(receivedInvite)
+        bookingViewModel.accept(receivedApplication)
 
         #expect(gigStore.gig(id: gig.id)?.status == .booked)
-        #expect(inviteStore.receivedInvites(for: invitedTalent.id).first?.status == .accepted)
-        #expect(applicationStore.receivedApplications(for: hostProfile.id).first { $0.id == pendingApplication.id }?.status == .rejected)
+        #expect(applicationStore.receivedApplications(for: hostProfile.id).first { $0.id == acceptedApplication.id }?.status == .accepted)
+        #expect(applicationStore.receivedApplications(for: hostProfile.id).first { $0.id == rejectedApplication.id }?.status == .rejected)
     }
 
+    @Test func networkErrorsUseUserFacingMessages() {
+        #expect(
+            APIError.requestFailed(statusCode: 403, message: "{\"message\":\"permission denied\"}").setLoopUserMessage
+                == "Tu sesion no tiene permisos para esta accion. Inicia sesion de nuevo si el problema continua."
+        )
+        #expect(
+            URLError(.notConnectedToInternet).setLoopUserMessage
+                == "No hay conexion a internet. Revisa la conexion e intentalo de nuevo."
+        )
+    }
+
+    @MainActor
+    @Test func defaultSearchServiceDoesNotExposeMockExploreData() async throws {
+        let profile = UserProfile(
+            id: UUID(),
+            email: "search@setloop.local",
+            displayName: "Busqueda Real",
+            role: .musician,
+            city: "Madrid",
+            bio: "Perfil de busqueda.",
+            genres: ["Indie"],
+            instruments: ["Solista"]
+        )
+
+        let results = try await SearchService().search(filters: ExploreFilters(), profile: profile)
+
+        #expect(results.isEmpty)
+    }
+
+    @MainActor
+    @Test func bookingLoadKeepsLoadedApplicationsWhenGigRefreshFails() async {
+        let suiteName = "SetLoopTests.BookingPartialLoad.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        let hostProfile = UserProfile(
+            id: UUID(),
+            email: "venue-partial@setloop.local",
+            displayName: "Sala Parcial",
+            role: .venue,
+            city: "Madrid",
+            venueAddress: "Calle Luna 10",
+            bio: "Local de pruebas.",
+            genres: ["Indie"],
+            instruments: ["House"],
+            venueCapacity: 150
+        )
+        let applicantProfile = UserProfile(
+            id: UUID(),
+            email: "artist-partial@setloop.local",
+            displayName: "Artista Parcial",
+            role: .musician,
+            city: "Madrid",
+            bio: "Proyecto en directo.",
+            genres: ["Indie"],
+            instruments: ["Solista"]
+        )
+        let gig = Gig(
+            id: UUID(),
+            venueID: nil,
+            hostUserID: hostProfile.id,
+            title: "Fecha parcial",
+            venueName: hostProfile.displayName,
+            city: "Madrid",
+            performanceDate: Date(),
+            durationMinutes: 60,
+            budgetMin: 200,
+            budgetMax: 300,
+            currency: "EUR",
+            roleNeeded: .musician,
+            requiredGenres: ["Indie"],
+            description: nil,
+            status: .open,
+            imageURL: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        let application = Application(
+            id: UUID(),
+            gigID: gig.id,
+            applicantUserID: applicantProfile.id,
+            applicantDisplayName: applicantProfile.displayName,
+            applicantRole: applicantProfile.role,
+            applicantCity: applicantProfile.city,
+            message: "Me interesa esta fecha.",
+            status: .pending,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+
+        let gigStore = GigStore(
+            userDefaults: userDefaults,
+            seedGigs: [],
+            remoteService: FailingVenueGigRemoteService()
+        )
+        gigStore.upsert(gig)
+        let notificationStore = NotificationStore(userDefaults: userDefaults)
+        let bookingService = StubBookingRemoteService(applications: [application])
+        let applicationStore = ApplicationStore(
+            gigStore: gigStore,
+            notificationStore: notificationStore,
+            userDefaults: userDefaults,
+            remoteService: bookingService
+        )
+        let viewModel = BookingViewModel(
+            applicationStore: applicationStore,
+            currentProfile: hostProfile,
+            gigStore: gigStore
+        )
+
+        await viewModel.load()
+
+        #expect(viewModel.errorMessage == "Carga de prueba fallida.")
+        #expect(viewModel.sections.flatMap(\.items).map(\.id).contains(application.id))
+    }
+
+}
+
+private enum TestLoadError: LocalizedError {
+    case unavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable:
+            return "Carga de prueba fallida."
+        }
+    }
+}
+
+private final class FailingVenueGigRemoteService: VenueGigRemoteServicing {
+    func fetchVenues() async throws -> [Venue] {
+        []
+    }
+
+    func fetchVenue(ownerID: UUID) async throws -> Venue? {
+        nil
+    }
+
+    func saveVenue(_ venue: Venue) async throws -> Venue {
+        venue
+    }
+
+    func fetchGigs() async throws -> [Gig] {
+        throw TestLoadError.unavailable
+    }
+
+    func fetchGigs(hostUserID: UUID) async throws -> [Gig] {
+        throw TestLoadError.unavailable
+    }
+
+    func saveGig(_ gig: Gig) async throws -> Gig {
+        gig
+    }
+
+    func updateGigStatus(gigID: UUID, status: GigStatus) async throws -> Gig {
+        throw TestLoadError.unavailable
+    }
+}
+
+private final class StubBookingRemoteService: BookingRemoteServicing {
+    var applications: [Application]
+
+    init(applications: [Application]) {
+        self.applications = applications
+    }
+
+    func fetchApplications() async throws -> [Application] {
+        applications
+    }
+
+    func fetchApplication(gigID: UUID, applicantUserID: UUID) async throws -> Application? {
+        applications.first { $0.gigID == gigID && $0.applicantUserID == applicantUserID }
+    }
+
+    func createApplication(_ application: Application) async throws -> Application {
+        applications.append(application)
+        return application
+    }
+
+    func updateApplicationStatus(applicationID: UUID, status: ApplicationStatus) async throws -> Application {
+        guard let index = applications.firstIndex(where: { $0.id == applicationID }) else {
+            throw TestLoadError.unavailable
+        }
+
+        applications[index].status = status
+        return applications[index]
+    }
 }

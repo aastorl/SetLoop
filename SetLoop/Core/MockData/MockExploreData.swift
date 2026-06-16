@@ -167,53 +167,6 @@ enum MockExploreData {
         )
     ]
 
-    static let musicians: [UserProfile] = [
-        UserProfile(
-            id: lunaProfileID,
-            email: "luna@example.com",
-            displayName: "Luna Roja",
-            role: .musician,
-            city: "Madrid",
-            bio: "Trio indie pop con set de 60-90 minutos y equipo técnico cerrado.",
-            genres: ["Indie", "Pop"],
-            instruments: ["Trio", "Voz", "Guitarra", "Bateria"],
-            isPremium: true
-        ),
-        UserProfile(
-            id: UUID(uuidString: "5C0B2E72-FB1B-4664-955B-8A6C8F8CB437")!,
-            email: "sara@example.com",
-            displayName: "Sara Valls",
-            role: .musician,
-            city: "Barcelona",
-            bio: "Soul y jazz en formato dúo o banda reducida para salas y eventos.",
-            genres: ["Soul", "Jazz"],
-            instruments: ["Duo", "Voz", "Teclado"],
-            isPremium: false
-        ),
-        UserProfile(
-            id: marcosProfileID,
-            email: "marcos@example.com",
-            displayName: "Marcos Vidal DJ Set",
-            role: .dj,
-            city: "Barcelona",
-            bio: "DJ open format con foco en warm up, disco y house elegante.",
-            genres: [],
-            instruments: ["Open Format", "CDJ", "Controller"],
-            isPremium: false
-        ),
-        UserProfile(
-            id: UUID(uuidString: "BE2F12FD-5C33-4218-8F89-3D03008BAE8F")!,
-            email: "noa@example.com",
-            displayName: "NOA / VINYL",
-            role: .dj,
-            city: "Valencia",
-            bio: "Selector en vinilo para sesiones disco, funk y club sets prolongados.",
-            genres: [],
-            instruments: ["Club Set", "Vinilo", "Hybrid"],
-            isPremium: true
-        )
-    ]
-
     static let reviews: [Review] = [
         Review(
             id: UUID(),
@@ -271,77 +224,11 @@ enum MockExploreData {
     }
 
     static func makeExploreCards(
-        gigs: [Gig],
-        venues: [Venue] = venues,
-        musicians: [UserProfile] = musicians
+        gigs: [Gig]
     ) -> [ExploreCardItem] {
-        let gigCards = gigs
-            .filter { $0.status == .open }
-            .map { gig in
-                ExploreCardItem(
-                    id: gig.id,
-                    kind: .gig,
-                    title: gig.title,
-                    subtitle: gig.venueName ?? "Fecha publicada",
-                    city: gig.city,
-                    detail: "\(gig.durationMinutes ?? 60) min",
-                    date: gig.performanceDate,
-                    role: gig.roleNeeded,
-                    priceText: budgetText(min: gig.budgetMin, max: gig.budgetMax, currency: gig.currency),
-                    tags: gig.requiredGenres,
-                    imageURL: gig.imageURL,
-                    symbolName: "calendar.badge.clock"
-                )
-            }
-
-        let venueCards = venues.map { venue in
-            ExploreCardItem(
-                id: venue.id,
-                kind: .venue,
-                title: venue.name,
-                subtitle: venue.address,
-                city: venue.city,
-                detail: venue.capacity.map { "Hasta \($0) personas" } ?? "Aforo por confirmar",
-                date: nil,
-                role: .venue,
-                priceText: nil,
-                tags: venue.genres,
-                imageURL: venue.imageURL,
-                symbolName: "music.mic"
-            )
-        }
-
-        let musicianCards = musicians.map { musician in
-            ExploreCardItem(
-                id: musician.id,
-                kind: .musician,
-                title: musician.displayName,
-                subtitle: musician.bio ?? musician.role.displayName,
-                city: musician.city,
-                detail: musician.summaryDetailItems.prefix(2).joined(separator: " · "),
-                date: nil,
-                role: musician.role,
-                priceText: musician.isPremium ? "Premium" : nil,
-                tags: musician.exploreTags,
-                imageURL: musician.avatarURL,
-                symbolName: "person.crop.square"
-            )
-        }
-
-        return gigCards + venueCards + musicianCards
-    }
-
-    private static func budgetText(min: Int?, max: Int?, currency: String) -> String? {
-        switch (min, max) {
-        case (.some(let min), .some(let max)):
-            return "\(min)-\(max) \(currency)"
-        case (.some(let min), nil):
-            return "Desde \(min) \(currency)"
-        case (nil, .some(let max)):
-            return "Hasta \(max) \(currency)"
-        case (nil, nil):
-            return nil
-        }
+        ExploreCardFactory.makeCards(
+            gigs: gigs
+        )
     }
 
     private static func date(days: Int, hour: Int) -> Date {

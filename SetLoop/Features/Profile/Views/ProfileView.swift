@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UIKit
 
 struct ProfileView: View {
     @StateObject private var viewModel: ProfileViewModel
@@ -86,6 +87,7 @@ private struct ProfileEditorScreen: View {
     let onProfileSaved: (@MainActor (UserProfile) -> Void)?
     let onSignOut: () -> Void
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @FocusState private var focusedField: ProfileEditorField?
 
     var body: some View {
         Form {
@@ -118,16 +120,19 @@ private struct ProfileEditorScreen: View {
             Section("Datos base") {
                 TextField(viewModel.displayNameLabel, text: $viewModel.displayName)
                     .textInputAutocapitalization(.words)
+                    .focused($focusedField, equals: .displayName)
                     .accessibilityIdentifier("profile.displayNameField")
 
                 TextField("Ciudad", text: $viewModel.city)
                     .textContentType(.addressCity)
                     .textInputAutocapitalization(.words)
+                    .focused($focusedField, equals: .city)
                     .accessibilityIdentifier("profile.cityField")
 
                 if viewModel.profile.role == .venue {
                     TextField("Direccion", text: $viewModel.venueAddress)
                         .textInputAutocapitalization(.words)
+                        .focused($focusedField, equals: .venueAddress)
                         .accessibilityIdentifier("profile.venueAddressField")
                 }
             }
@@ -214,6 +219,7 @@ private struct ProfileEditorScreen: View {
                 Section("Aforo") {
                     TextField(viewModel.detailsPlaceholder, text: $viewModel.venueCapacityText)
                         .keyboardType(.numberPad)
+                        .focused($focusedField, equals: .venueCapacity)
                     Text(viewModel.detailsHelperText)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -223,6 +229,7 @@ private struct ProfileEditorScreen: View {
             Section("Bio") {
                 TextField("Describe brevemente tu propuesta", text: $viewModel.bio, axis: .vertical)
                     .lineLimit(4...7)
+                    .focused($focusedField, equals: .bio)
                     .accessibilityIdentifier("profile.bioField")
             }
 
@@ -247,6 +254,12 @@ private struct ProfileEditorScreen: View {
         }
         .accessibilityIdentifier("profile.editor")
         .navigationBarTitleDisplayMode(.inline)
+        .scrollDismissesKeyboard(.interactively)
+        .background {
+            KeyboardDismissTapRecognizer {
+                dismissKeyboard()
+            }
+        }
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem else {
                 return
@@ -260,7 +273,7 @@ private struct ProfileEditorScreen: View {
                 }
             }
         }
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 Divider()
 
@@ -289,12 +302,14 @@ private struct ProfileEditorScreen: View {
                 .accessibilityIdentifier("profile.saveButton")
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .background(.bar)
             }
+            .background(.bar)
         }
     }
 
     private func handleSaveTap() {
+        dismissKeyboard()
+
         Task { @MainActor in
             guard let savedProfile = await viewModel.save() else {
                 return
@@ -302,6 +317,126 @@ private struct ProfileEditorScreen: View {
 
             await Task.yield()
             onProfileSaved?(savedProfile)
+        }
+    }
+
+    private func dismissKeyboard() {
+        focusedField = nil
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+}
+
+private enum ProfileEditorField: Hashable {
+    case displayName
+    case city
+    case venueAddress
+    case venueCapacity
+    case bio
+}
+
+private struct KeyboardDismissTapRecognizer: UIViewRepresentable {
+    let onTapOutsideInput: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onTapOutsideInput: onTapOutsideInput)
+    }
+
+    func makeUIView(context: Context) -> WindowObserverView {
+        let view = WindowObserverView()
+        view.onWindowChange = { [weak coordinator = context.coordinator] window in
+            coordinator?.attach(to: window)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: WindowObserverView, context: Context) {
+        context.coordinator.onTapOutsideInput = onTapOutsideInput
+    }
+
+    static func dismantleUIView(_ uiView: WindowObserverView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    final class WindowObserverView: UIView {
+        var onWindowChange: ((UIWindow?) -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            onWindowChange?(window)
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onTapOutsideInput: () -> Void
+        private weak var window: UIWindow?
+        private weak var recognizer: UITapGestureRecognizer?
+
+        init(onTapOutsideInput: @escaping () -> Void) {
+            self.onTapOutsideInput = onTapOutsideInput
+        }
+
+        func attach(to window: UIWindow?) {
+            guard let window else {
+                detach()
+                return
+            }
+
+            guard self.window !== window else {
+                return
+            }
+
+            detach()
+
+            let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            recognizer.cancelsTouchesInView = false
+            recognizer.delegate = self
+            window.addGestureRecognizer(recognizer)
+
+            self.window = window
+            self.recognizer = recognizer
+        }
+
+        func detach() {
+            if let recognizer, let window {
+                window.removeGestureRecognizer(recognizer)
+            }
+
+            recognizer = nil
+            window = nil
+        }
+
+        @objc private func handleTap() {
+            onTapOutsideInput()
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            isTextInput(touch.view) == false
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+
+        private func isTextInput(_ view: UIView?) -> Bool {
+            var currentView = view
+
+            while let candidate = currentView {
+                if candidate is UITextField || candidate is UITextView {
+                    return true
+                }
+
+                currentView = candidate.superview
+            }
+
+            return false
         }
     }
 }

@@ -115,14 +115,14 @@ extension UserProfile {
         role == .venue ? instruments : []
     }
 
-    func preferredGenres(for venueTalentRole: UserRole? = nil) -> [String] {
+    func preferredGenres(for venueRoleNeeded: UserRole? = nil) -> [String] {
         switch role {
         case .musician:
             return genres
         case .dj:
             return []
         case .venue:
-            switch venueTalentRole {
+            switch venueRoleNeeded {
             case .dj:
                 return venueDJGenres
             case .musician, .venue, .none:

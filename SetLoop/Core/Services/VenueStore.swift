@@ -5,25 +5,36 @@ import Combine
 final class VenueStore: ObservableObject {
     private let venuesKey = "setloop.mock.venues"
     private let userDefaults: UserDefaults
+    private let remoteService: VenueGigRemoteServicing?
     private let encoder = JSONEncoder.supabase
     private let decoder = JSONDecoder.supabase
 
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+
     @Published private(set) var venues: [Venue] {
         didSet {
-            persistVenues()
+            if remoteService == nil {
+                persistVenues()
+            }
         }
     }
 
     init(
         userDefaults: UserDefaults = .standard,
-        seedVenues: [Venue] = MockExploreData.venues
+        seedVenues: [Venue]? = nil,
+        remoteService: VenueGigRemoteServicing? = nil
     ) {
         self.userDefaults = userDefaults
+        self.remoteService = remoteService
+        let resolvedSeedVenues = seedVenues ?? MockExploreData.venues
 
-        if let persistedVenues = Self.loadPersistedVenues(from: userDefaults, using: decoder) {
+        if remoteService != nil {
+            self.venues = []
+        } else if let persistedVenues = Self.loadPersistedVenues(from: userDefaults, using: decoder) {
             self.venues = persistedVenues
         } else {
-            self.venues = seedVenues.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            self.venues = resolvedSeedVenues.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         }
     }
 
@@ -41,11 +52,76 @@ final class VenueStore: ObservableObject {
             return nil
         }
 
-        let existingVenue = venue(for: profile.id)
+        let venue = makeHostedVenue(using: profile, existingVenue: venue(for: profile.id))
+        upsert(venue)
+        return venue
+    }
+
+    @discardableResult
+    func saveHostedVenue(using profile: UserProfile) async throws -> Venue? {
+        guard profile.role == .venue else {
+            return nil
+        }
+
+        guard let remoteService else {
+            return syncHostedVenue(using: profile)
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let remoteVenue = try await remoteService.fetchVenue(ownerID: profile.id)
+            let venue = makeHostedVenue(
+                using: profile,
+                existingVenue: remoteVenue ?? venue(for: profile.id)
+            )
+            let savedVenue = try await remoteService.saveVenue(venue)
+            errorMessage = nil
+            upsert(savedVenue)
+            return savedVenue
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
+    }
+
+    func loadAll() async throws {
+        guard let remoteService else {
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            venues = try await remoteService.fetchVenues()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
+    }
+
+    @discardableResult
+    func upsert(_ venue: Venue) -> Venue {
+        if let index = venues.firstIndex(where: { $0.id == venue.id }) {
+            venues[index] = venue
+        } else if let ownerIndex = venues.firstIndex(where: { $0.ownerID == venue.ownerID }) {
+            venues[ownerIndex] = venue
+        } else {
+            venues.append(venue)
+        }
+
+        venues.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return venue
+    }
+
+    private func makeHostedVenue(using profile: UserProfile, existingVenue: Venue?) -> Venue {
         let allGenres = Array(Set(profile.venueBandGenres + profile.venueDJGenres)).sorted()
         let now = Date()
 
-        let venue = Venue(
+        return Venue(
             id: existingVenue?.id ?? UUID(),
             ownerID: profile.id,
             name: profile.displayName,
@@ -63,23 +139,6 @@ final class VenueStore: ObservableObject {
             createdAt: existingVenue?.createdAt ?? now,
             updatedAt: now
         )
-
-        upsert(venue)
-        return venue
-    }
-
-    @discardableResult
-    func upsert(_ venue: Venue) -> Venue {
-        if let index = venues.firstIndex(where: { $0.id == venue.id }) {
-            venues[index] = venue
-        } else if let ownerIndex = venues.firstIndex(where: { $0.ownerID == venue.ownerID }) {
-            venues[ownerIndex] = venue
-        } else {
-            venues.append(venue)
-        }
-
-        venues.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        return venue
     }
 
     private func persistVenues() {

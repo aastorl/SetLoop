@@ -18,7 +18,10 @@ struct NotificationsView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if viewModel.items.isEmpty {
+                if viewModel.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if viewModel.items.isEmpty {
                     ContentUnavailableView(
                         "Sin avisos",
                         systemImage: "bell",
@@ -27,7 +30,9 @@ struct NotificationsView: View {
                 } else {
                     List(viewModel.items) { item in
                         Button {
-                            viewModel.markAsRead(item)
+                            Task {
+                                await viewModel.markAsReadAsync(item)
+                            }
                         } label: {
                             NotificationRow(item: item)
                         }
@@ -41,10 +46,25 @@ struct NotificationsView: View {
                 if viewModel.canMarkAllAsRead {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Marcar todas") {
-                            viewModel.markAllAsRead()
+                            Task {
+                                await viewModel.markAllAsReadAsync()
+                            }
                         }
                     }
                 }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if let errorMessage = viewModel.errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(.bar)
+                }
+            }
+            .task {
+                await viewModel.load()
             }
         }
     }
@@ -98,12 +118,6 @@ private extension NotificationItem {
         case .applicationAccepted:
             return .green
         case .applicationRejected:
-            return .red
-        case .inviteReceived:
-            return .blue
-        case .inviteAccepted:
-            return .green
-        case .inviteRejected:
             return .red
         }
     }

@@ -2,20 +2,11 @@ import Foundation
 
 enum ExploreItemKind: String, CaseIterable, Identifiable {
     case gig
-    case venue
-    case musician
 
     var id: String { rawValue }
 
     var displayName: String {
-        switch self {
-        case .gig:
-            return "Fechas"
-        case .venue:
-            return "Locales"
-        case .musician:
-            return "Talento"
-        }
+        "Fechas"
     }
 }
 

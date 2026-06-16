@@ -8,47 +8,37 @@ struct MainTabView: View {
 
     @StateObject private var gigStore: GigStore
     @StateObject private var venueStore: VenueStore
-    @StateObject private var reviewStore: ReviewStore
     @StateObject private var notificationStore: NotificationStore
     @StateObject private var applicationStore: ApplicationStore
-    @StateObject private var inviteStore: InviteStore
     private let detailService: ExploreDetailServicing
-    private let talentDirectory: MockTalentDirectory
 
     init(
         profile: UserProfile,
         onPersistProfile: @escaping @MainActor (UserProfile) async throws -> UserProfile,
         onSignOut: @escaping () -> Void
     ) {
-        let gigStore = GigStore()
-        let venueStore = VenueStore()
-        let reviewStore = ReviewStore()
-        let talentDirectory = MockTalentDirectory()
+        let venueGigService = SupabaseVenueGigService()
+        let bookingService = SupabaseBookingService()
+        let notificationService = SupabaseNotificationService()
+        let gigStore = GigStore(seedGigs: [], remoteService: venueGigService)
+        let venueStore = VenueStore(seedVenues: [], remoteService: venueGigService)
         let detailService = StoreBackedExploreDetailService(
             gigStore: gigStore,
-            venueStore: venueStore,
-            talentDirectory: talentDirectory
+            venueStore: venueStore
         )
         self._currentProfile = State(initialValue: profile)
         self.onPersistProfile = onPersistProfile
         self.detailService = detailService
-        self.talentDirectory = talentDirectory
         self.onSignOut = onSignOut
         _gigStore = StateObject(wrappedValue: gigStore)
         _venueStore = StateObject(wrappedValue: venueStore)
-        _reviewStore = StateObject(wrappedValue: reviewStore)
-        let notificationStore = NotificationStore()
+        let notificationStore = NotificationStore(remoteService: notificationService)
         _notificationStore = StateObject(wrappedValue: notificationStore)
         _applicationStore = StateObject(
             wrappedValue: ApplicationStore(
                 gigStore: gigStore,
-                notificationStore: notificationStore
-            )
-        )
-        _inviteStore = StateObject(
-            wrappedValue: InviteStore(
-                gigStore: gigStore,
-                notificationStore: notificationStore
+                notificationStore: notificationStore,
+                remoteService: bookingService
             )
         )
         let hostedVenue = venueStore.syncHostedVenue(using: profile)
@@ -61,58 +51,42 @@ struct MainTabView: View {
         onPersistProfile: @escaping @MainActor (UserProfile) async throws -> UserProfile,
         onSignOut: @escaping () -> Void
     ) {
-        let gigStore = GigStore()
-        let venueStore = VenueStore()
-        let reviewStore = ReviewStore()
-        let talentDirectory = MockTalentDirectory()
+        let venueGigService = SupabaseVenueGigService()
+        let bookingService = SupabaseBookingService()
+        let notificationService = SupabaseNotificationService()
+        let gigStore = GigStore(seedGigs: [], remoteService: venueGigService)
+        let venueStore = VenueStore(seedVenues: [], remoteService: venueGigService)
         self._currentProfile = State(initialValue: profile)
         self.onPersistProfile = onPersistProfile
         self.detailService = detailService
-        self.talentDirectory = talentDirectory
         self.onSignOut = onSignOut
         _gigStore = StateObject(wrappedValue: gigStore)
         _venueStore = StateObject(wrappedValue: venueStore)
-        _reviewStore = StateObject(wrappedValue: reviewStore)
-        let notificationStore = NotificationStore()
+        let notificationStore = NotificationStore(remoteService: notificationService)
         _notificationStore = StateObject(wrappedValue: notificationStore)
         _applicationStore = StateObject(
             wrappedValue: ApplicationStore(
                 gigStore: gigStore,
-                notificationStore: notificationStore
-            )
-        )
-        _inviteStore = StateObject(
-            wrappedValue: InviteStore(
-                gigStore: gigStore,
-                notificationStore: notificationStore
+                notificationStore: notificationStore,
+                remoteService: bookingService
             )
         )
     }
 
     var body: some View {
         TabView {
-            ExploreView(
-                currentProfile: currentProfile,
-                detailService: detailService,
-                gigStore: gigStore,
-                venueStore: venueStore,
-                reviewStore: reviewStore,
-                talentDirectory: talentDirectory,
-                inviteStore: inviteStore
-            )
-                .environmentObject(applicationStore)
+            primaryTab
                 .tabItem {
-                    Label("Explorar", systemImage: "magnifyingglass")
+                    Label(primaryTabTitle, systemImage: primaryTabSystemImage)
                 }
 
             BookingView(
                 currentProfile: currentProfile,
                 applicationStore: applicationStore,
-                inviteStore: inviteStore,
                 gigStore: gigStore
             )
                 .tabItem {
-                    Label("Booking", systemImage: "calendar")
+                    Label("Candidaturas", systemImage: "tray.full")
                 }
 
             NotificationsView(
@@ -135,6 +109,9 @@ struct MainTabView: View {
                 }
         }
         .accessibilityIdentifier("main.tabView")
+        .task(id: currentProfile.renderIdentity) {
+            await loadVenueGigData()
+        }
     }
 
     @MainActor
@@ -142,5 +119,71 @@ struct MainTabView: View {
         currentProfile = profile
         let hostedVenue = venueStore.syncHostedVenue(using: profile)
         gigStore.syncHostedGigMetadata(using: profile, venue: hostedVenue)
+    }
+
+    private func loadVenueGigData() async {
+        let profile = currentProfile
+
+        if profile.role == .venue {
+            await performDataLoad {
+                _ = try await venueStore.saveHostedVenue(using: profile)
+            }
+        }
+
+        await performDataLoad {
+            try await venueStore.loadAll()
+        }
+
+        await performDataLoad {
+            try await gigStore.loadAll()
+        }
+
+        await performDataLoad {
+            try await applicationStore.loadAll()
+        }
+
+        await performDataLoad {
+            try await notificationStore.load(for: profile.id)
+        }
+    }
+
+    private func performDataLoad(_ operation: () async throws -> Void) async {
+        do {
+            try await operation()
+        } catch {
+            // Store-level errorMessage drives the visible error state in each tab.
+        }
+    }
+
+    @ViewBuilder
+    private var primaryTab: some View {
+        if currentProfile.role == .venue {
+            NavigationStack {
+                VenueGigsView(
+                    viewModel: VenueGigsViewModel(
+                        currentProfile: currentProfile,
+                        gigStore: gigStore,
+                        venueStore: venueStore,
+                        applicationStore: applicationStore
+                    )
+                )
+            }
+        } else {
+            ExploreView(
+                currentProfile: currentProfile,
+                detailService: detailService,
+                gigStore: gigStore,
+                venueStore: venueStore,
+                applicationStore: applicationStore
+            )
+        }
+    }
+
+    private var primaryTabTitle: String {
+        currentProfile.role == .venue ? "Fechas" : "Explorar"
+    }
+
+    private var primaryTabSystemImage: String {
+        currentProfile.role == .venue ? "calendar.badge.clock" : "magnifyingglass"
     }
 }

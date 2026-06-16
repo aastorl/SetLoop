@@ -23,7 +23,7 @@ final class ExploreViewModel: ObservableObject {
         self.filters.city = currentProfile.city
     }
 
-    func load(venueTalentRole: UserRole?) async {
+    func load() async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -31,11 +31,10 @@ final class ExploreViewModel: ObservableObject {
         do {
             items = try await searchService.search(
                 filters: filters,
-                profile: currentProfile,
-                venueTalentRole: venueTalentRole
+                profile: currentProfile
             )
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = error.setLoopUserMessage
         }
     }
 

@@ -97,7 +97,7 @@ final class ProfileViewModel: ObservableObject {
         case .onboarding:
             return "La home y los resultados se ajustan a tu ciudad, generos y datos clave."
         case .profile:
-            return "Tu home usa este perfil para priorizar fechas, talento y avisos relevantes."
+            return "Tu home usa este perfil para priorizar fechas y avisos relevantes."
         }
     }
 
@@ -209,7 +209,7 @@ final class ProfileViewModel: ObservableObject {
             lastSavedAt = Date()
             return savedProfile
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = error.setLoopUserMessage
             return nil
         }
     }

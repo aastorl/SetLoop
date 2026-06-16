@@ -4,8 +4,7 @@ import Foundation
 protocol SearchServicing {
     func search(
         filters: ExploreFilters,
-        profile: UserProfile,
-        venueTalentRole: UserRole?
+        profile: UserProfile
     ) async throws -> [ExploreCardItem]
 }
 
@@ -18,24 +17,23 @@ final class SearchService: SearchServicing {
         itemsProvider: (() -> [ExploreCardItem])? = nil,
         calendar: Calendar = .current
     ) {
-        self.itemsProvider = itemsProvider ?? { MockExploreData.exploreCards }
+        self.itemsProvider = itemsProvider ?? { [] }
         self.calendar = calendar
     }
 
     func search(
         filters: ExploreFilters,
-        profile: UserProfile,
-        venueTalentRole: UserRole?
+        profile: UserProfile
     ) async throws -> [ExploreCardItem] {
         let items = itemsProvider()
         let cityQuery = filters.city.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedGenres = Set(
-            profile.preferredGenres(for: venueTalentRole).map { $0.lowercased() }
+            profile.preferredGenres().map { $0.lowercased() }
         )
 
         return items
             .filter { item in
-            let matchesRole = matches(item: item, profile: profile, venueTalentRole: venueTalentRole)
+            let matchesRole = matches(item: item, profile: profile)
             let matchesCity = cityQuery.isEmpty || item.city.localizedCaseInsensitiveContains(cityQuery)
             let matchesDate = filters.date == nil || item.date.map { calendar.isDate($0, inSameDayAs: filters.date!) } == true
 
@@ -62,13 +60,12 @@ final class SearchService: SearchServicing {
             }
     }
 
-    private func matches(item: ExploreCardItem, profile: UserProfile, venueTalentRole: UserRole?) -> Bool {
+    private func matches(item: ExploreCardItem, profile: UserProfile) -> Bool {
         switch profile.role {
         case .musician, .dj:
             return item.kind == .gig && item.role == profile.role
         case .venue:
-            let targetRole = venueTalentRole ?? .musician
-            return item.kind == .musician && item.role == targetRole
+            return false
         }
     }
 
@@ -87,5 +84,43 @@ final class SearchService: SearchServicing {
         }
 
         return total
+    }
+}
+
+enum ExploreCardFactory {
+    static func makeCards(
+        gigs: [Gig]
+    ) -> [ExploreCardItem] {
+        gigs
+            .filter { $0.status == .open }
+            .map { gig in
+                ExploreCardItem(
+                    id: gig.id,
+                    kind: .gig,
+                    title: gig.title,
+                    subtitle: gig.venueName ?? "Fecha publicada",
+                    city: gig.city,
+                    detail: "\(gig.durationMinutes ?? 60) min",
+                    date: gig.performanceDate,
+                    role: gig.roleNeeded,
+                    priceText: budgetText(min: gig.budgetMin, max: gig.budgetMax, currency: gig.currency),
+                    tags: gig.requiredGenres,
+                    imageURL: gig.imageURL,
+                    symbolName: "calendar.badge.clock"
+                )
+            }
+    }
+
+    private static func budgetText(min: Int?, max: Int?, currency: String) -> String? {
+        switch (min, max) {
+        case (.some(let min), .some(let max)):
+            return "\(min)-\(max) \(currency)"
+        case (.some(let min), nil):
+            return "Desde \(min) \(currency)"
+        case (nil, .some(let max)):
+            return "Hasta \(max) \(currency)"
+        case (nil, nil):
+            return nil
+        }
     }
 }

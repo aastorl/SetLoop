@@ -4,6 +4,12 @@ import Combine
 @MainActor
 final class BookingViewModel: ObservableObject {
     @Published private(set) var sections: [BookingSectionItem] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var isUpdating = false
+    @Published private(set) var errorMessage: String?
+    @Published var applicantDisplayMode: BookingDisplayMode = .list
+    @Published var visibleMonth: Date
+    @Published var selectedDate: Date
     @Published var venueFilter: VenueBookingFilter = .pending {
         didSet {
             reloadItems()
@@ -12,30 +18,27 @@ final class BookingViewModel: ObservableObject {
 
     private let currentProfile: UserProfile
     private let applicationStore: ApplicationStore
-    private let inviteStore: InviteStore
     private let gigStore: GigStore
+    private let calendar: Calendar
     private var cancellables = Set<AnyCancellable>()
 
     init(
         applicationStore: ApplicationStore,
-        inviteStore: InviteStore,
         currentProfile: UserProfile,
-        gigStore: GigStore
+        gigStore: GigStore,
+        calendar: Calendar = .current
     ) {
         self.currentProfile = currentProfile
         self.applicationStore = applicationStore
-        self.inviteStore = inviteStore
         self.gigStore = gigStore
+        self.calendar = calendar
+        let today = calendar.startOfDay(for: Date())
+        self.visibleMonth = today
+        self.selectedDate = today
 
         reloadItems()
 
         applicationStore.$applications
-            .sink { [weak self] _ in
-                self?.reloadItems()
-            }
-            .store(in: &cancellables)
-
-        inviteStore.$invites
             .sink { [weak self] _ in
                 self?.reloadItems()
             }
@@ -52,76 +55,268 @@ final class BookingViewModel: ObservableObject {
         currentProfile.role == .venue
     }
 
+    var showsApplicantDisplayModePicker: Bool {
+        currentProfile.role != .venue
+    }
+
+    var screenTitle: String {
+        currentProfile.role == .venue ? "Candidaturas" : "Mis candidaturas"
+    }
+
     var emptyStateTitle: String {
         if currentProfile.role == .venue {
             switch venueFilter {
             case .pending:
-                return "Sin actividad pendiente"
+                return "Sin candidaturas pendientes"
             case .managed:
-                return "Sin actividad gestionada"
+                return "Sin candidaturas gestionadas"
             }
         }
 
-        return "Sin actividad de booking"
+        return "Sin candidaturas"
     }
 
     var emptyStateDescription: String {
         if currentProfile.role == .venue {
             switch venueFilter {
             case .pending:
-                return "Las candidaturas pendientes y tus invitaciones abiertas apareceran aqui."
+                return "Las candidaturas pendientes a tus fechas apareceran aqui."
             case .managed:
-                return "Las respuestas aceptadas o rechazadas se guardaran aqui."
+                return "Las candidaturas aceptadas o rechazadas se guardaran aqui."
             }
         }
 
-        return "Cuando solicites una fecha o recibas una invitacion, aparecera aqui con su estado."
+        return "Cuando solicites una fecha, aparecera aqui con su estado."
     }
 
     var hasItems: Bool {
         sections.contains { $0.items.isEmpty == false }
     }
 
-    func accept(_ item: BookingEntryItem) {
-        switch item.kind {
-        case .receivedApplication:
-            guard currentProfile.role == .venue else { return }
-            guard let updatedApplication = applicationStore.updateStatus(applicationID: item.id, status: .accepted) else {
-                return
+    var calendarMonthTitle: String {
+        visibleMonth.formatted(.dateTime.month(.wide).year())
+    }
+
+    var selectedDayTitle: String {
+        selectedDate.formatted(.dateTime.weekday(.wide).day().month(.wide))
+    }
+
+    var calendarItems: [BookingEntryItem] {
+        sections
+            .flatMap(\.items)
+            .filter { $0.performanceDate != nil }
+            .sorted {
+                guard let lhsDate = $0.performanceDate, let rhsDate = $1.performanceDate else {
+                    return $0.createdAt > $1.createdAt
+                }
+
+                return lhsDate < rhsDate
             }
-            closeGigAfterConfirmation(gigID: updatedApplication.gigID, acceptedApplicationID: updatedApplication.id, acceptedInviteID: nil)
-        case .receivedInvite:
-            guard currentProfile.role == .musician || currentProfile.role == .dj else { return }
-            guard let updatedInvite = inviteStore.updateStatus(inviteID: item.id, status: .accepted) else {
-                return
+    }
+
+    var selectedDayCalendarItems: [BookingEntryItem] {
+        calendarItems.filter { item in
+            guard let performanceDate = item.performanceDate else {
+                return false
             }
-            closeGigAfterConfirmation(gigID: updatedInvite.gigID, acceptedApplicationID: nil, acceptedInviteID: updatedInvite.id)
-        case .sentApplication, .sentInvite:
-            break
+
+            return calendar.isDate(performanceDate, inSameDayAs: selectedDate)
         }
+    }
+
+    var bookingCalendarWeeks: [BookingCalendarWeek] {
+        guard let monthInterval = calendar.dateInterval(of: .month, for: visibleMonth) else {
+            return []
+        }
+
+        let firstWeekday = calendar.component(.weekday, from: monthInterval.start)
+        let leadingDays = (firstWeekday - calendar.firstWeekday + 7) % 7
+        let gridStart = calendar.date(byAdding: .day, value: -leadingDays, to: monthInterval.start) ?? monthInterval.start
+
+        return (0..<6).map { weekIndex in
+            let weekStart = calendar.date(byAdding: .day, value: weekIndex * 7, to: gridStart) ?? gridStart
+            let days = (0..<7).map { dayOffset in
+                let date = calendar.date(byAdding: .day, value: dayOffset, to: weekStart) ?? weekStart
+                let dayItems = calendarItems.filter { item in
+                    guard let performanceDate = item.performanceDate else {
+                        return false
+                    }
+
+                    return calendar.isDate(performanceDate, inSameDayAs: date)
+                }
+
+                return BookingCalendarDay(
+                    date: date,
+                    dayNumber: calendar.component(.day, from: date),
+                    isInDisplayedMonth: calendar.isDate(date, equalTo: monthInterval.start, toGranularity: .month),
+                    isToday: calendar.isDateInToday(date),
+                    isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
+                    entriesCount: dayItems.count,
+                    hasPendingEntries: dayItems.contains { $0.status == .pending },
+                    hasAcceptedEntries: dayItems.contains { $0.status == .accepted },
+                    hasInactiveEntries: dayItems.contains { $0.status == .rejected || $0.status == .withdrawn }
+                )
+            }
+
+            return BookingCalendarWeek(startDate: weekStart, days: days)
+        }
+    }
+
+    func load() async {
+        guard applicationStore.usesRemoteService else {
+            reloadItems()
+            return
+        }
+
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        var loadErrorMessage: String?
+
+        loadErrorMessage = await performBookingLoad {
+            try await self.gigStore.loadAll()
+        } ?? loadErrorMessage
+
+        loadErrorMessage = await performBookingLoad {
+            try await self.applicationStore.loadAll()
+        } ?? loadErrorMessage
+
+        errorMessage = loadErrorMessage
+        reloadItems()
+    }
+
+    func accept(_ item: BookingEntryItem) {
+        guard applicationStore.usesRemoteService == false else {
+            Task {
+                await acceptAsync(item)
+            }
+            return
+        }
+
+        acceptLocally(item)
     }
 
     func reject(_ item: BookingEntryItem) {
-        switch item.kind {
-        case .receivedApplication:
-            guard currentProfile.role == .venue else { return }
-            applicationStore.updateStatus(applicationID: item.id, status: .rejected)
-        case .receivedInvite:
-            guard currentProfile.role == .musician || currentProfile.role == .dj else { return }
-            inviteStore.updateStatus(inviteID: item.id, status: .rejected)
-        case .sentApplication, .sentInvite:
-            break
+        guard applicationStore.usesRemoteService == false else {
+            Task {
+                await rejectAsync(item)
+            }
+            return
+        }
+
+        rejectLocally(item)
+    }
+
+    func acceptAsync(_ item: BookingEntryItem) async {
+        guard applicationStore.usesRemoteService else {
+            acceptLocally(item)
+            return
+        }
+
+        await performRemoteDecision {
+            guard self.currentProfile.role == .venue,
+                  item.kind == .receivedApplication else {
+                return
+            }
+
+            _ = try await self.applicationStore.saveStatus(applicationID: item.id, status: .accepted)
         }
     }
 
-    private func closeGigAfterConfirmation(
-        gigID: UUID,
-        acceptedApplicationID: UUID?,
-        acceptedInviteID: UUID?
-    ) {
+    func rejectAsync(_ item: BookingEntryItem) async {
+        guard applicationStore.usesRemoteService else {
+            rejectLocally(item)
+            return
+        }
+
+        await performRemoteDecision {
+            guard self.currentProfile.role == .venue,
+                  item.kind == .receivedApplication else {
+                return
+            }
+
+            _ = try await self.applicationStore.saveStatus(applicationID: item.id, status: .rejected)
+        }
+    }
+
+    func select(_ day: BookingCalendarDay) {
+        selectedDate = calendar.startOfDay(for: day.date)
+        visibleMonth = day.date
+    }
+
+    func moveToPreviousMonth() {
+        moveVisibleMonth(by: -1)
+    }
+
+    func moveToNextMonth() {
+        moveVisibleMonth(by: 1)
+    }
+
+    private func acceptLocally(_ item: BookingEntryItem) {
+        guard currentProfile.role == .venue,
+              item.kind == .receivedApplication,
+              let updatedApplication = applicationStore.updateStatus(applicationID: item.id, status: .accepted) else {
+            return
+        }
+
+        closeGigAfterConfirmation(gigID: updatedApplication.gigID, acceptedApplicationID: updatedApplication.id)
+    }
+
+    private func rejectLocally(_ item: BookingEntryItem) {
+        guard currentProfile.role == .venue,
+              item.kind == .receivedApplication else {
+            return
+        }
+
+        applicationStore.updateStatus(applicationID: item.id, status: .rejected)
+    }
+
+    private func closeGigAfterConfirmation(gigID: UUID, acceptedApplicationID: UUID?) {
         _ = gigStore.updateStatus(gigID: gigID, status: .booked)
         applicationStore.rejectPendingApplications(for: gigID, excluding: acceptedApplicationID)
-        inviteStore.rejectPendingInvites(for: gigID, excluding: acceptedInviteID)
+    }
+
+    private func performRemoteDecision(_ operation: () async throws -> Void) async {
+        guard isUpdating == false else {
+            return
+        }
+
+        isUpdating = true
+        errorMessage = nil
+        defer { isUpdating = false }
+
+        do {
+            try await operation()
+            try await gigStore.loadAll()
+            try await applicationStore.loadAll()
+            errorMessage = nil
+            reloadItems()
+        } catch {
+            errorMessage = error.setLoopUserMessage
+        }
+    }
+
+    private func moveVisibleMonth(by value: Int) {
+        guard let newMonth = calendar.date(byAdding: .month, value: value, to: visibleMonth) else {
+            return
+        }
+
+        visibleMonth = newMonth
+
+        if calendar.isDate(selectedDate, equalTo: newMonth, toGranularity: .month) == false,
+           let monthInterval = calendar.dateInterval(of: .month, for: newMonth) {
+            selectedDate = monthInterval.start
+        }
+    }
+
+    private func performBookingLoad(_ operation: () async throws -> Void) async -> String? {
+        do {
+            try await operation()
+            return nil
+        } catch {
+            return error.setLoopUserMessage
+        }
     }
 
     private func reloadItems() {
@@ -130,9 +325,6 @@ final class BookingViewModel: ObservableObject {
             let filteredApplications = receivedApplications.filter { application in
                 venueFilter.includes(application.status)
             }
-            let sentInvites = inviteStore.sentInvites(for: currentProfile.id).filter { invite in
-                venueFilter.includes(invite.status)
-            }
 
             sections = [
                 makeApplicationSection(
@@ -140,32 +332,28 @@ final class BookingViewModel: ObservableObject {
                     title: "Candidaturas recibidas",
                     applications: filteredApplications,
                     kind: .receivedApplication
-                ),
-                makeInviteSection(
-                    id: "venue.invites",
-                    title: "Invitaciones enviadas",
-                    invites: sentInvites,
-                    kind: .sentInvite
                 )
             ]
             .filter { $0.items.isEmpty == false }
             return
         }
 
-        sections = [
-            makeApplicationSection(
-                id: "talent.applications",
-                title: "Solicitudes enviadas",
-                applications: applicationStore.sentApplications(for: currentProfile.id),
-                kind: .sentApplication
-            ),
-            makeInviteSection(
-                id: "talent.invites",
-                title: "Invitaciones recibidas",
-                invites: inviteStore.receivedInvites(for: currentProfile.id),
-                kind: .receivedInvite
+        let applicationItems = makeApplicationSection(
+            id: "applicant.applications",
+            title: "Candidaturas enviadas",
+            applications: applicationStore.sentApplications(for: currentProfile.id),
+            kind: .sentApplication
+        )
+        .items
+        .sorted { $0.createdAt > $1.createdAt }
+
+        sections = ApplicationBookingGroup.allCases.map { group in
+            BookingSectionItem(
+                id: "applicant.\(group.rawValue)",
+                title: group.displayName,
+                items: applicationItems.filter { group.includes($0.status) }
             )
-        ]
+        }
         .filter { $0.items.isEmpty == false }
     }
 
@@ -196,33 +384,51 @@ final class BookingViewModel: ObservableObject {
 
         return BookingSectionItem(id: id, title: title, items: items)
     }
+}
 
-    private func makeInviteSection(
-        id: String,
-        title: String,
-        invites: [TalentInvite],
-        kind: BookingEntryKind
-    ) -> BookingSectionItem {
-        let items = invites.map { invite in
-            let gig = gigStore.gig(id: invite.gigID)
+enum BookingDisplayMode: String, CaseIterable, Identifiable {
+    case list
+    case calendar
 
-            return BookingEntryItem(
-                id: invite.id,
-                kind: kind,
-                gigTitle: gig?.title ?? "Fecha no disponible",
-                venueName: gig?.venueName ?? invite.hostDisplayName,
-                city: gig?.city ?? invite.talentCity,
-                performanceDate: gig?.performanceDate,
-                counterpartDisplayName: kind == .sentInvite ? invite.talentDisplayName : invite.hostDisplayName,
-                counterpartRole: kind == .sentInvite ? invite.talentRole : .venue,
-                counterpartCity: kind == .sentInvite ? invite.talentCity : gig?.city,
-                message: invite.message,
-                status: invite.status,
-                createdAt: invite.createdAt
-            )
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .list:
+            return "Lista"
+        case .calendar:
+            return "Calendario"
         }
+    }
+}
 
-        return BookingSectionItem(id: id, title: title, items: items)
+enum ApplicationBookingGroup: String, CaseIterable, Identifiable {
+    case pending
+    case confirmed
+    case notSelected
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .pending:
+            return "Pendientes"
+        case .confirmed:
+            return "Confirmadas"
+        case .notSelected:
+            return "No seleccionadas"
+        }
+    }
+
+    func includes(_ status: ApplicationStatus) -> Bool {
+        switch self {
+        case .pending:
+            return status == .pending
+        case .confirmed:
+            return status == .accepted
+        case .notSelected:
+            return status == .rejected || status == .withdrawn
+        }
     }
 }
 
@@ -257,28 +463,37 @@ struct BookingSectionItem: Identifiable, Equatable {
     let items: [BookingEntryItem]
 }
 
+struct BookingCalendarWeek: Identifiable, Equatable {
+    let startDate: Date
+    let days: [BookingCalendarDay]
+
+    var id: Date { startDate }
+}
+
+struct BookingCalendarDay: Identifiable, Equatable {
+    let date: Date
+    let dayNumber: Int
+    let isInDisplayedMonth: Bool
+    let isToday: Bool
+    let isSelected: Bool
+    let entriesCount: Int
+    let hasPendingEntries: Bool
+    let hasAcceptedEntries: Bool
+    let hasInactiveEntries: Bool
+
+    var id: Date { date }
+}
+
 enum BookingEntryKind: String, Equatable {
     case sentApplication
     case receivedApplication
-    case sentInvite
-    case receivedInvite
 
     var isIncoming: Bool {
-        switch self {
-        case .receivedApplication, .receivedInvite:
-            return true
-        case .sentApplication, .sentInvite:
-            return false
-        }
+        self == .receivedApplication
     }
 
     var displayName: String {
-        switch self {
-        case .sentApplication, .receivedApplication:
-            return "Solicitud"
-        case .sentInvite, .receivedInvite:
-            return "Invitacion"
-        }
+        "Candidatura"
     }
 }
 

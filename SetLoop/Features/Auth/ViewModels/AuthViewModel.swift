@@ -60,7 +60,7 @@ final class AuthViewModel: ObservableObject {
             }
         } catch {
             sessionState = .signedOut
-            errorMessage = error.localizedDescription
+            errorMessage = error.setLoopUserMessage
         }
     }
 
@@ -85,7 +85,7 @@ final class AuthViewModel: ObservableObject {
             }
             sessionState = .signedIn(profile)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = error.setLoopUserMessage
         }
     }
 
@@ -100,7 +100,7 @@ final class AuthViewModel: ObservableObject {
             let profile = try await authService.signIn(email: email, password: password)
             sessionState = .signedIn(profile)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = error.setLoopUserMessage
         }
     }
 
@@ -111,7 +111,7 @@ final class AuthViewModel: ObservableObject {
             sessionState = .signedOut
             password = ""
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = error.setLoopUserMessage
         }
     }
 

@@ -7,28 +7,45 @@ final class ApplicationStore: ObservableObject {
     private let gigStore: GigStore
     private let notificationStore: NotificationStore
     private let userDefaults: UserDefaults
+    private let remoteService: BookingRemoteServicing?
     private let encoder = JSONEncoder.supabase
     private let decoder = JSONDecoder.supabase
 
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+
     @Published private(set) var applications: [Application] {
         didSet {
-            persistApplications()
+            if remoteService == nil {
+                persistApplications()
+            }
         }
     }
 
     init(
         gigStore: GigStore,
         notificationStore: NotificationStore,
-        userDefaults: UserDefaults = .standard
+        userDefaults: UserDefaults = .standard,
+        remoteService: BookingRemoteServicing? = nil
     ) {
         let decoder = JSONDecoder.supabase
         self.gigStore = gigStore
         self.notificationStore = notificationStore
         self.userDefaults = userDefaults
-        self.applications = Self.loadPersistedApplications(
-            from: userDefaults,
-            using: decoder
-        )
+        self.remoteService = remoteService
+
+        if remoteService != nil {
+            self.applications = []
+        } else {
+            self.applications = Self.loadPersistedApplications(
+                from: userDefaults,
+                using: decoder
+            )
+        }
+    }
+
+    var usesRemoteService: Bool {
+        remoteService != nil
     }
 
     func createApplication(gigID: UUID, applicantProfile: UserProfile, message: String) -> Application {
@@ -36,23 +53,63 @@ final class ApplicationStore: ObservableObject {
             return existing
         }
 
-        let now = Date()
-        let application = Application(
-            id: UUID(),
+        let application = makeApplication(
             gigID: gigID,
-            applicantUserID: applicantProfile.id,
-            applicantDisplayName: applicantProfile.displayName,
-            applicantRole: applicantProfile.role,
-            applicantCity: applicantProfile.city,
-            message: message.trimmingCharacters(in: .whitespacesAndNewlines),
-            status: .pending,
-            createdAt: now,
-            updatedAt: now
+            applicantProfile: applicantProfile,
+            message: message
         )
 
         applications.insert(application, at: 0)
         createReceivedNotification(for: application)
         return application
+    }
+
+    @discardableResult
+    func submitApplication(gigID: UUID, applicantProfile: UserProfile, message: String) async throws -> Application {
+        guard let remoteService else {
+            return createApplication(gigID: gigID, applicantProfile: applicantProfile, message: message)
+        }
+
+        if let existing = application(for: gigID, applicantUserID: applicantProfile.id) {
+            return existing
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            if let existing = try await remoteService.fetchApplication(
+                gigID: gigID,
+                applicantUserID: applicantProfile.id
+            ) {
+                errorMessage = nil
+                upsert(existing)
+                return existing
+            }
+
+            let savedApplication = try await remoteService.createApplication(
+                makeApplication(
+                    gigID: gigID,
+                    applicantProfile: applicantProfile,
+                    message: message
+                )
+            )
+            errorMessage = nil
+            upsert(savedApplication)
+            return savedApplication
+        } catch {
+            if let existing = try? await remoteService.fetchApplication(
+                gigID: gigID,
+                applicantUserID: applicantProfile.id
+            ) {
+                errorMessage = nil
+                upsert(existing)
+                return existing
+            }
+
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
     }
 
     func sentApplications(for applicantUserID: UUID) -> [Application] {
@@ -67,6 +124,23 @@ final class ApplicationStore: ObservableObject {
                 gigStore.gig(id: application.gigID)?.hostUserID == hostUserID
             }
             .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func loadAll() async throws {
+        guard let remoteService else {
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            applications = try await remoteService.fetchApplications()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
     }
 
     @discardableResult
@@ -89,6 +163,34 @@ final class ApplicationStore: ObservableObject {
         return updatedApplication
     }
 
+    @discardableResult
+    func saveStatus(applicationID: UUID, status: ApplicationStatus) async throws -> Application? {
+        guard let remoteService else {
+            return updateStatus(applicationID: applicationID, status: status)
+        }
+
+        if let existing = applications.first(where: { $0.id == applicationID }),
+           existing.status == status {
+            return existing
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let updatedApplication = try await remoteService.updateApplicationStatus(
+                applicationID: applicationID,
+                status: status
+            )
+            errorMessage = nil
+            upsert(updatedApplication)
+            return updatedApplication
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
+    }
+
     func rejectPendingApplications(for gigID: UUID, excluding excludedApplicationID: UUID? = nil) {
         let pendingIDs = applications
             .filter { $0.gigID == gigID && $0.status == .pending && $0.id != excludedApplicationID }
@@ -103,6 +205,38 @@ final class ApplicationStore: ObservableObject {
         applications.first { application in
             application.gigID == gigID && application.applicantUserID == applicantUserID
         }
+    }
+
+    @discardableResult
+    private func upsert(_ application: Application) -> Application {
+        if let index = applications.firstIndex(where: { $0.id == application.id }) {
+            applications[index] = application
+        } else {
+            applications.append(application)
+        }
+
+        applications.sort { $0.createdAt > $1.createdAt }
+        return application
+    }
+
+    private func makeApplication(
+        gigID: UUID,
+        applicantProfile: UserProfile,
+        message: String
+    ) -> Application {
+        let now = Date()
+        return Application(
+            id: UUID(),
+            gigID: gigID,
+            applicantUserID: applicantProfile.id,
+            applicantDisplayName: applicantProfile.displayName,
+            applicantRole: applicantProfile.role,
+            applicantCity: applicantProfile.city,
+            message: message.trimmingCharacters(in: .whitespacesAndNewlines),
+            status: .pending,
+            createdAt: now,
+            updatedAt: now
+        )
     }
 
     private func createReceivedNotification(for application: Application) {

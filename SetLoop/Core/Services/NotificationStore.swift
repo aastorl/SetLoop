@@ -5,22 +5,38 @@ import Combine
 final class NotificationStore: ObservableObject {
     private let notificationsKey = "setloop.mock.notifications"
     private let userDefaults: UserDefaults
+    private let remoteService: NotificationRemoteServicing?
     private let encoder = JSONEncoder.supabase
     private let decoder = JSONDecoder.supabase
 
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+
     @Published private(set) var notifications: [AppNotification] {
         didSet {
-            persistNotifications()
+            if remoteService == nil {
+                persistNotifications()
+            }
         }
     }
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        remoteService: NotificationRemoteServicing? = nil
+    ) {
         let decoder = JSONDecoder.supabase
         self.userDefaults = userDefaults
-        self.notifications = Self.loadPersistedNotifications(
-            from: userDefaults,
-            using: decoder
-        )
+        self.remoteService = remoteService
+        self.notifications = remoteService == nil
+            ? Self.loadPersistedNotifications(
+                from: userDefaults,
+                using: decoder
+            )
+            : []
+    }
+
+    var usesRemoteService: Bool {
+        remoteService != nil
     }
 
     func notifications(for userID: UUID) -> [AppNotification] {
@@ -33,6 +49,23 @@ final class NotificationStore: ObservableObject {
         notifications.count { $0.userID == userID && !$0.isRead }
     }
 
+    func load(for userID: UUID) async throws {
+        guard let remoteService else {
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            notifications = try await remoteService.fetchNotifications(for: userID)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
+    }
+
     @discardableResult
     func add(
         userID: UUID,
@@ -40,8 +73,7 @@ final class NotificationStore: ObservableObject {
         title: String,
         body: String,
         relatedGigID: UUID? = nil,
-        relatedApplicationID: UUID? = nil,
-        relatedInviteID: UUID? = nil
+        relatedApplicationID: UUID? = nil
     ) -> AppNotification {
         let notification = AppNotification(
             id: UUID(),
@@ -52,8 +84,7 @@ final class NotificationStore: ObservableObject {
             createdAt: Date(),
             isRead: false,
             relatedGigID: relatedGigID,
-            relatedApplicationID: relatedApplicationID,
-            relatedInviteID: relatedInviteID
+            relatedApplicationID: relatedApplicationID
         )
 
         notifications.insert(notification, at: 0)
@@ -71,6 +102,22 @@ final class NotificationStore: ObservableObject {
         notifications = updatedNotifications
     }
 
+    func saveMarkAsRead(_ notificationID: UUID) async throws {
+        guard let remoteService else {
+            markAsRead(notificationID)
+            return
+        }
+
+        do {
+            let notification = try await remoteService.markAsRead(notificationID: notificationID)
+            upsert(notification)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
+    }
+
     func markAllAsRead(for userID: UUID) {
         var updatedNotifications = notifications
         var didChange = false
@@ -83,6 +130,42 @@ final class NotificationStore: ObservableObject {
         if didChange {
             notifications = updatedNotifications
         }
+    }
+
+    func saveMarkAllAsRead(for userID: UUID) async throws {
+        guard let remoteService else {
+            markAllAsRead(for: userID)
+            return
+        }
+
+        do {
+            let updatedNotifications = try await remoteService.markAllAsRead(for: userID)
+
+            if updatedNotifications.isEmpty {
+                markAllAsRead(for: userID)
+            } else {
+                for notification in updatedNotifications {
+                    upsert(notification)
+                }
+            }
+
+            errorMessage = nil
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
+    }
+
+    @discardableResult
+    private func upsert(_ notification: AppNotification) -> AppNotification {
+        if let index = notifications.firstIndex(where: { $0.id == notification.id }) {
+            notifications[index] = notification
+        } else {
+            notifications.append(notification)
+        }
+
+        notifications.sort { $0.createdAt > $1.createdAt }
+        return notification
     }
 
     private func persistNotifications() {

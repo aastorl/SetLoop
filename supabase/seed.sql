@@ -390,30 +390,6 @@ values
     )
 on conflict (gig_id, applicant_user_id) do nothing;
 
-insert into public.invites (
-    id,
-    gig_id,
-    host_user_id,
-    talent_user_id,
-    message
-)
-values
-    (
-        '3eda55d1-f2eb-4ad0-bcf5-078d48de6841',
-        'a7b54c32-3507-4ea4-927e-0a9967a858f1',
-        '9a8a0e21-4b40-496b-9032-950baea3d6fa',
-        'ee8d95c9-0d0d-45c7-9f33-08281c68fa26',
-        'Nos interesa tu enfoque para el warm up. Si te encaja, compartimos briefing.'
-    ),
-    (
-        '9392c5ac-8744-4272-82b4-dfb4461fa3ea',
-        'f24d0ac4-4f54-44d9-a6c8-9340d1651a7a',
-        'b5c7619f-13a4-44b8-b0b8-699d89a21182',
-        'be2f12fd-5c33-4218-8f89-3d03008bae8f',
-        'Buscamos una sesion de club con criterio disco y house. Te interesa?'
-    )
-on conflict (gig_id, host_user_id, talent_user_id) do nothing;
-
 insert into public.reviews (
     id,
     reviewer_id,

@@ -4,9 +4,6 @@ enum AppNotificationType: String, Codable, CaseIterable, Identifiable {
     case applicationReceived = "application_received"
     case applicationAccepted = "application_accepted"
     case applicationRejected = "application_rejected"
-    case inviteReceived = "invite_received"
-    case inviteAccepted = "invite_accepted"
-    case inviteRejected = "invite_rejected"
 
     var id: String { rawValue }
 
@@ -18,12 +15,6 @@ enum AppNotificationType: String, Codable, CaseIterable, Identifiable {
             return "checkmark.circle.fill"
         case .applicationRejected:
             return "xmark.circle.fill"
-        case .inviteReceived:
-            return "paperplane.circle.fill"
-        case .inviteAccepted:
-            return "checkmark.seal.fill"
-        case .inviteRejected:
-            return "xmark.seal.fill"
         }
     }
 }
@@ -38,7 +29,6 @@ struct AppNotification: Identifiable, Codable, Equatable {
     var isRead: Bool
     var relatedGigID: UUID?
     var relatedApplicationID: UUID?
-    var relatedInviteID: UUID?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -50,6 +40,5 @@ struct AppNotification: Identifiable, Codable, Equatable {
         case isRead = "is_read"
         case relatedGigID = "related_gig_id"
         case relatedApplicationID = "related_application_id"
-        case relatedInviteID = "related_invite_id"
     }
 }

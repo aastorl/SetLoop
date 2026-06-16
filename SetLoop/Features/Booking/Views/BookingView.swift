@@ -6,13 +6,11 @@ struct BookingView: View {
     init(
         currentProfile: UserProfile,
         applicationStore: ApplicationStore,
-        inviteStore: InviteStore,
         gigStore: GigStore
     ) {
         _viewModel = StateObject(
             wrappedValue: BookingViewModel(
                 applicationStore: applicationStore,
-                inviteStore: inviteStore,
                 currentProfile: currentProfile,
                 gigStore: gigStore
             )
@@ -33,38 +31,249 @@ struct BookingView: View {
                     .padding(.top, 12)
                 }
 
+                if viewModel.showsApplicantDisplayModePicker {
+                    Picker("Vista", selection: $viewModel.applicantDisplayMode) {
+                        ForEach(BookingDisplayMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                }
+
+                if let errorMessage = viewModel.errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                }
+
                 Group {
-                    if viewModel.hasItems == false {
+                    if viewModel.isLoading && viewModel.hasItems == false {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if viewModel.hasItems == false {
                         ContentUnavailableView(
                             viewModel.emptyStateTitle,
                             systemImage: "tray",
                             description: Text(viewModel.emptyStateDescription)
                         )
+                    } else if viewModel.applicantDisplayMode == .calendar && viewModel.showsApplicantDisplayModePicker {
+                        applicantCalendar
                     } else {
-                        List {
-                            ForEach(viewModel.sections) { section in
-                                Section(section.title) {
-                                    ForEach(section.items) { item in
-                                        BookingApplicationRow(
-                                            item: item,
-                                            onAccept: { viewModel.accept(item) },
-                                            onReject: { viewModel.reject(item) }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        .listStyle(.insetGrouped)
+                        applicationList
                     }
                 }
             }
-            .navigationTitle("Booking")
+            .navigationTitle(viewModel.screenTitle)
+            .task {
+                await viewModel.load()
+            }
+        }
+    }
+
+    private var applicationList: some View {
+        List {
+            ForEach(viewModel.sections) { section in
+                Section(section.title) {
+                    ForEach(section.items) { item in
+                        bookingRow(item)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private var applicantCalendar: some View {
+        List {
+            Section {
+                BookingMonthCalendar(
+                    monthTitle: viewModel.calendarMonthTitle,
+                    weeks: viewModel.bookingCalendarWeeks,
+                    onPreviousMonth: viewModel.moveToPreviousMonth,
+                    onNextMonth: viewModel.moveToNextMonth,
+                    onSelectDay: viewModel.select
+                )
+                .padding(.vertical, 6)
+            } header: {
+                Text("Calendario")
+            }
+
+            Section(viewModel.selectedDayTitle) {
+                if viewModel.selectedDayCalendarItems.isEmpty {
+                    ContentUnavailableView(
+                        "Sin candidaturas este dia",
+                        systemImage: "calendar",
+                        description: Text("No hay candidaturas vinculadas al dia seleccionado.")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 150)
+                } else {
+                    ForEach(viewModel.selectedDayCalendarItems) { item in
+                        bookingRow(item)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func bookingRow(_ item: BookingEntryItem) -> some View {
+        BookingApplicationRow(
+            item: item,
+            isUpdating: viewModel.isUpdating,
+            onAccept: {
+                Task {
+                    await viewModel.acceptAsync(item)
+                }
+            },
+            onReject: {
+                Task {
+                    await viewModel.rejectAsync(item)
+                }
+            }
+        )
+    }
+}
+
+private struct BookingMonthCalendar: View {
+    let monthTitle: String
+    let weeks: [BookingCalendarWeek]
+    let onPreviousMonth: () -> Void
+    let onNextMonth: () -> Void
+    let onSelectDay: (BookingCalendarDay) -> Void
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
+    private let weekdaySymbols = Self.makeWeekdaySymbols()
+
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 12) {
+                Button(action: onPreviousMonth) {
+                    Image(systemName: "chevron.left")
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Mes anterior")
+
+                Text(monthTitle.capitalized)
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+
+                Button(action: onNextMonth) {
+                    Image(systemName: "chevron.right")
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Mes siguiente")
+            }
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                    Text(symbol)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+
+                ForEach(weeks) { week in
+                    ForEach(week.days) { day in
+                        BookingCalendarDayButton(day: day) {
+                            onSelectDay(day)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func makeWeekdaySymbols() -> [String] {
+        let formatter = DateFormatter()
+        let symbols = formatter.veryShortWeekdaySymbols ?? ["D", "L", "M", "X", "J", "V", "S"]
+        let firstWeekday = Calendar.current.firstWeekday - 1
+        return Array(symbols[firstWeekday...]) + Array(symbols[..<firstWeekday])
+    }
+}
+
+private struct BookingCalendarDayButton: View {
+    let day: BookingCalendarDay
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 4) {
+                Text("\(day.dayNumber)")
+                    .font(.subheadline.weight(day.isSelected ? .bold : .regular))
+                    .foregroundStyle(foregroundStyle)
+                    .frame(height: 18)
+
+                HStack(spacing: 3) {
+                    if day.hasPendingEntries {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 5, height: 5)
+                    }
+
+                    if day.hasAcceptedEntries {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 5, height: 5)
+                    }
+
+                    if day.hasInactiveEntries {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 5, height: 5)
+                    }
+
+                    if day.entriesCount > 3 {
+                        Text("\(day.entriesCount)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(day.isSelected ? Color.white : Color.secondary)
+                    }
+                }
+                .frame(height: 8)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(background)
+            .overlay {
+                if day.isToday && day.isSelected == false {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.accentColor.opacity(0.55), lineWidth: 1)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .opacity(day.isInDisplayedMonth ? 1 : 0.35)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var foregroundStyle: Color {
+        if day.isSelected {
+            return .white
+        }
+
+        return day.isInDisplayedMonth ? .primary : .secondary
+    }
+
+    @ViewBuilder
+    private var background: some View {
+        if day.isSelected {
+            Color.accentColor
+        } else if day.entriesCount > 0 {
+            Color(.tertiarySystemBackground)
+        } else {
+            Color.clear
         }
     }
 }
 
 private struct BookingApplicationRow: View {
     let item: BookingEntryItem
+    let isUpdating: Bool
     let onAccept: () -> Void
     let onReject: () -> Void
 
@@ -127,9 +336,11 @@ private struct BookingApplicationRow: View {
                 HStack(spacing: 10) {
                     Button("Rechazar", action: onReject)
                         .buttonStyle(.bordered)
+                        .disabled(isUpdating)
 
                     Button("Aceptar", action: onAccept)
                         .buttonStyle(.borderedProminent)
+                        .disabled(isUpdating)
                 }
                 .padding(.top, 4)
             }
