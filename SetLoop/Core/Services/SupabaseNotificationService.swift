@@ -4,6 +4,7 @@ protocol NotificationRemoteServicing {
     func fetchNotifications(for userID: UUID) async throws -> [AppNotification]
     func markAsRead(notificationID: UUID) async throws -> AppNotification
     func markAllAsRead(for userID: UUID) async throws -> [AppNotification]
+    func deleteNotification(notificationID: UUID) async throws
 }
 
 final class SupabaseNotificationService: NotificationRemoteServicing {
@@ -64,6 +65,18 @@ final class SupabaseNotificationService: NotificationRemoteServicing {
             body: NotificationReadUpdateRequest(isRead: true),
             authToken: try await accessToken(),
             additionalHeaders: ["Prefer": "return=representation"]
+        )
+    }
+
+    func deleteNotification(notificationID: UUID) async throws {
+        let _: EmptyResponse = try await apiClient.request(
+            path: "/rest/v1/notifications",
+            queryItems: [
+                URLQueryItem(name: "id", value: "eq.\(notificationID.notificationRestID)")
+            ],
+            method: .delete,
+            authToken: try await accessToken(),
+            additionalHeaders: ["Prefer": "return=minimal"]
         )
     }
 

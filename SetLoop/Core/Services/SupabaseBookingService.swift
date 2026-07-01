@@ -5,6 +5,7 @@ protocol BookingRemoteServicing {
     func fetchApplication(gigID: UUID, applicantUserID: UUID) async throws -> Application?
     func createApplication(_ application: Application) async throws -> Application
     func updateApplicationStatus(applicationID: UUID, status: ApplicationStatus) async throws -> Application
+    func deleteApplication(applicationID: UUID) async throws
 }
 
 final class SupabaseBookingService: BookingRemoteServicing {
@@ -79,6 +80,18 @@ final class SupabaseBookingService: BookingRemoteServicing {
         }
 
         return updatedApplication
+    }
+
+    func deleteApplication(applicationID: UUID) async throws {
+        let _: EmptyResponse = try await apiClient.request(
+            path: "/rest/v1/applications",
+            queryItems: [
+                URLQueryItem(name: "id", value: "eq.\(applicationID.bookingRestID)")
+            ],
+            method: .delete,
+            authToken: try await accessToken(),
+            additionalHeaders: ["Prefer": "return=minimal"]
+        )
     }
 
     private func accessToken() async throws -> String {

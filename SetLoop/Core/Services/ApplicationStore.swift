@@ -207,6 +207,29 @@ final class ApplicationStore: ObservableObject {
         }
     }
 
+    func delete(applicationID: UUID) {
+        applications.removeAll { $0.id == applicationID }
+    }
+
+    func saveDelete(applicationID: UUID) async throws {
+        guard let remoteService else {
+            delete(applicationID: applicationID)
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            try await remoteService.deleteApplication(applicationID: applicationID)
+            delete(applicationID: applicationID)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
+    }
+
     @discardableResult
     private func upsert(_ application: Application) -> Application {
         if let index = applications.firstIndex(where: { $0.id == application.id }) {

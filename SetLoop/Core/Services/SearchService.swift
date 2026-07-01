@@ -89,10 +89,12 @@ final class SearchService: SearchServicing {
 
 enum ExploreCardFactory {
     static func makeCards(
-        gigs: [Gig]
+        gigs: [Gig],
+        referenceDate: Date = Date(),
+        calendar: Calendar = .current
     ) -> [ExploreCardItem] {
         gigs
-            .filter { $0.status == .open }
+            .filter { $0.isOpenForApplications(referenceDate: referenceDate, calendar: calendar) }
             .map { gig in
                 ExploreCardItem(
                     id: gig.id,

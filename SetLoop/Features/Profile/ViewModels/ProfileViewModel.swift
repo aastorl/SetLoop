@@ -174,6 +174,10 @@ final class ProfileViewModel: ObservableObject {
         draftProfile.isProfileComplete && (mode == .onboarding || hasPendingChanges)
     }
 
+    var showsPrimaryActionButton: Bool {
+        mode == .onboarding || hasPendingChanges || isSaving
+    }
+
     func save() async -> UserProfile? {
         guard canSave else {
             return nil

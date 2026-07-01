@@ -2,11 +2,14 @@ import SwiftUI
 
 struct NotificationsView: View {
     @StateObject private var viewModel: NotificationsViewModel
+    private let onOpenApplication: (UUID) -> Void
 
     init(
         currentProfile: UserProfile,
-        notificationStore: NotificationStore
+        notificationStore: NotificationStore,
+        onOpenApplication: @escaping (UUID) -> Void = { _ in }
     ) {
+        self.onOpenApplication = onOpenApplication
         _viewModel = StateObject(
             wrappedValue: NotificationsViewModel(
                 currentProfile: currentProfile,
@@ -30,6 +33,10 @@ struct NotificationsView: View {
                 } else {
                     List(viewModel.items) { item in
                         Button {
+                            if let applicationID = item.relatedApplicationID {
+                                onOpenApplication(applicationID)
+                            }
+
                             Task {
                                 await viewModel.markAsReadAsync(item)
                             }
@@ -37,6 +44,15 @@ struct NotificationsView: View {
                             NotificationRow(item: item)
                         }
                         .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                Task {
+                                    await viewModel.deleteAsync(item)
+                                }
+                            } label: {
+                                Label("Eliminar", systemImage: "trash")
+                            }
+                        }
                     }
                     .listStyle(.insetGrouped)
                 }
@@ -105,7 +121,16 @@ private struct NotificationRow: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
+
+            if item.relatedApplicationID != nil {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxHeight: .infinity)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .padding(.vertical, 6)
     }
 }

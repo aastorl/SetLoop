@@ -156,6 +156,26 @@ final class NotificationStore: ObservableObject {
         }
     }
 
+    func delete(_ notificationID: UUID) {
+        notifications.removeAll { $0.id == notificationID }
+    }
+
+    func saveDelete(_ notificationID: UUID) async throws {
+        guard let remoteService else {
+            delete(notificationID)
+            return
+        }
+
+        do {
+            try await remoteService.deleteNotification(notificationID: notificationID)
+            delete(notificationID)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.setLoopUserMessage
+            throw error
+        }
+    }
+
     @discardableResult
     private func upsert(_ notification: AppNotification) -> AppNotification {
         if let index = notifications.firstIndex(where: { $0.id == notification.id }) {

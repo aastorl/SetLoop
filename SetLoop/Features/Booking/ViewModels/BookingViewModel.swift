@@ -82,7 +82,7 @@ final class BookingViewModel: ObservableObject {
             case .pending:
                 return "Las candidaturas pendientes a tus fechas apareceran aqui."
             case .managed:
-                return "Las candidaturas aceptadas o rechazadas se guardaran aqui."
+                return "Las candidaturas aceptadas o rechazadas se mostraran aqui hasta que pase la fecha."
             }
         }
 
@@ -240,6 +240,35 @@ final class BookingViewModel: ObservableObject {
         }
     }
 
+    func canDelete(_ item: BookingEntryItem) -> Bool {
+        guard item.status != .pending,
+              let performanceDate = item.performanceDate else {
+            return false
+        }
+
+        let startOfToday = calendar.startOfDay(for: Date())
+        let eventDay = calendar.startOfDay(for: performanceDate)
+        return eventDay < startOfToday
+    }
+
+    func deleteAsync(_ item: BookingEntryItem) async {
+        guard canDelete(item), isUpdating == false else {
+            return
+        }
+
+        isUpdating = true
+        errorMessage = nil
+        defer { isUpdating = false }
+
+        do {
+            try await applicationStore.saveDelete(applicationID: item.id)
+            errorMessage = nil
+            reloadItems()
+        } catch {
+            errorMessage = error.setLoopUserMessage
+        }
+    }
+
     func select(_ day: BookingCalendarDay) {
         selectedDate = calendar.startOfDay(for: day.date)
         visibleMonth = day.date
@@ -251,6 +280,63 @@ final class BookingViewModel: ObservableObject {
 
     func moveToNextMonth() {
         moveVisibleMonth(by: 1)
+    }
+
+    func item(applicationID: UUID) -> BookingEntryItem? {
+        guard let application = applicationStore.applications.first(where: { $0.id == applicationID }) else {
+            return nil
+        }
+
+        let kind: BookingEntryKind
+        if currentProfile.role == .venue {
+            guard gigStore.gig(id: application.gigID)?.hostUserID == currentProfile.id else {
+                return nil
+            }
+            guard isHistoricalVenueManagedApplication(application) == false else {
+                return nil
+            }
+            kind = .receivedApplication
+        } else {
+            guard application.applicantUserID == currentProfile.id else {
+                return nil
+            }
+            kind = .sentApplication
+        }
+
+        return makeApplicationItem(application, kind: kind)
+    }
+
+    private func shouldShowVenueApplication(_ application: Application) -> Bool {
+        guard venueFilter.includes(application.status) else {
+            return false
+        }
+
+        guard venueFilter == .managed else {
+            return true
+        }
+
+        return isHistoricalVenueManagedApplication(application) == false
+    }
+
+    private func isHistoricalVenueManagedApplication(_ application: Application) -> Bool {
+        guard application.status != .pending,
+              let performanceDate = gigStore.gig(id: application.gigID)?.performanceDate else {
+            return false
+        }
+
+        return performanceDate < Date()
+    }
+
+    func prepareForPresentation(_ item: BookingEntryItem) {
+        if currentProfile.role == .venue {
+            venueFilter = item.status == .pending ? .pending : .managed
+        } else {
+            applicantDisplayMode = .list
+        }
+    }
+
+    func showUnavailableApplicationMessage() {
+        errorMessage = "La candidatura ya no esta disponible."
     }
 
     private func acceptLocally(_ item: BookingEntryItem) {
@@ -323,7 +409,7 @@ final class BookingViewModel: ObservableObject {
         if currentProfile.role == .venue {
             let receivedApplications = applicationStore.receivedApplications(for: currentProfile.id)
             let filteredApplications = receivedApplications.filter { application in
-                venueFilter.includes(application.status)
+                shouldShowVenueApplication(application)
             }
 
             sections = [
@@ -363,26 +449,31 @@ final class BookingViewModel: ObservableObject {
         applications: [Application],
         kind: BookingEntryKind
     ) -> BookingSectionItem {
-        let items = applications.map { application in
-            let gig = gigStore.gig(id: application.gigID)
-
-            return BookingEntryItem(
-                id: application.id,
-                kind: kind,
-                gigTitle: gig?.title ?? "Fecha no disponible",
-                venueName: gig?.venueName,
-                city: gig?.city ?? "Ciudad por confirmar",
-                performanceDate: gig?.performanceDate,
-                counterpartDisplayName: kind == .receivedApplication ? application.applicantDisplayName : nil,
-                counterpartRole: kind == .receivedApplication ? application.applicantRole : nil,
-                counterpartCity: kind == .receivedApplication ? application.applicantCity : nil,
-                message: application.message,
-                status: application.status,
-                createdAt: application.createdAt
-            )
-        }
+        let items = applications.map { makeApplicationItem($0, kind: kind) }
 
         return BookingSectionItem(id: id, title: title, items: items)
+    }
+
+    private func makeApplicationItem(
+        _ application: Application,
+        kind: BookingEntryKind
+    ) -> BookingEntryItem {
+        let gig = gigStore.gig(id: application.gigID)
+
+        return BookingEntryItem(
+            id: application.id,
+            kind: kind,
+            gigTitle: gig?.title ?? "Fecha no disponible",
+            venueName: gig?.venueName,
+            city: gig?.city ?? "Ciudad por confirmar",
+            performanceDate: gig?.performanceDate,
+            counterpartDisplayName: kind == .receivedApplication ? application.applicantDisplayName : nil,
+            counterpartRole: kind == .receivedApplication ? application.applicantRole : nil,
+            counterpartCity: kind == .receivedApplication ? application.applicantCity : nil,
+            message: application.message,
+            status: application.status,
+            createdAt: application.createdAt
+        )
     }
 }
 

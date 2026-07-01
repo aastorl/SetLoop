@@ -2,7 +2,16 @@ import SwiftUI
 
 @MainActor
 struct MainTabView: View {
+    private enum Tab: Hashable {
+        case primary
+        case booking
+        case notifications
+        case profile
+    }
+
     @State private var currentProfile: UserProfile
+    @State private var selectedTab: Tab = .primary
+    @State private var selectedApplicationID: UUID?
     let onPersistProfile: @MainActor (UserProfile) async throws -> UserProfile
     let onSignOut: () -> Void
 
@@ -74,29 +83,34 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             primaryTab
                 .tabItem {
                     Label(primaryTabTitle, systemImage: primaryTabSystemImage)
                 }
+                .tag(Tab.primary)
 
             BookingView(
                 currentProfile: currentProfile,
                 applicationStore: applicationStore,
-                gigStore: gigStore
+                gigStore: gigStore,
+                targetApplicationID: $selectedApplicationID
             )
                 .tabItem {
                     Label("Candidaturas", systemImage: "tray.full")
                 }
+                .tag(Tab.booking)
 
             NotificationsView(
                 currentProfile: currentProfile,
-                notificationStore: notificationStore
+                notificationStore: notificationStore,
+                onOpenApplication: openApplication
             )
                 .tabItem {
                     Label("Avisos", systemImage: "bell")
                 }
                 .badge(notificationStore.unreadCount(for: currentProfile.id))
+                .tag(Tab.notifications)
 
             ProfileView(
                 profile: currentProfile,
@@ -107,6 +121,7 @@ struct MainTabView: View {
                 .tabItem {
                     Label("Perfil", systemImage: "person.crop.circle")
                 }
+                .tag(Tab.profile)
         }
         .accessibilityIdentifier("main.tabView")
         .task(id: currentProfile.renderIdentity) {
@@ -153,6 +168,11 @@ struct MainTabView: View {
         } catch {
             // Store-level errorMessage drives the visible error state in each tab.
         }
+    }
+
+    private func openApplication(_ applicationID: UUID) {
+        selectedApplicationID = applicationID
+        selectedTab = .booking
     }
 
     @ViewBuilder

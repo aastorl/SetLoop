@@ -110,6 +110,16 @@ final class NotificationsViewModel: ObservableObject {
         }
     }
 
+    func deleteAsync(_ item: NotificationItem) async {
+        do {
+            try await notificationStore.saveDelete(item.id)
+            errorMessage = nil
+            reload()
+        } catch {
+            errorMessage = error.setLoopUserMessage
+        }
+    }
+
     private func reload() {
         let notifications = notificationStore.notifications(for: currentProfile.id)
         items = notifications.map(NotificationItem.init)
@@ -124,6 +134,7 @@ struct NotificationItem: Identifiable, Equatable {
     let createdAt: Date
     let isRead: Bool
     let type: AppNotificationType
+    let relatedApplicationID: UUID?
 
     init(notification: AppNotification) {
         id = notification.id
@@ -132,5 +143,6 @@ struct NotificationItem: Identifiable, Equatable {
         createdAt = notification.createdAt
         isRead = notification.isRead
         type = notification.type
+        relatedApplicationID = notification.relatedApplicationID
     }
 }

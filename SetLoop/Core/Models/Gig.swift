@@ -49,3 +49,13 @@ struct Gig: Identifiable, Codable, Equatable {
         case updatedAt = "updated_at"
     }
 }
+
+extension Gig {
+    func isPast(referenceDate: Date = Date(), calendar: Calendar = .current) -> Bool {
+        calendar.startOfDay(for: performanceDate) < calendar.startOfDay(for: referenceDate)
+    }
+
+    func isOpenForApplications(referenceDate: Date = Date(), calendar: Calendar = .current) -> Bool {
+        status == .open && isPast(referenceDate: referenceDate, calendar: calendar) == false
+    }
+}

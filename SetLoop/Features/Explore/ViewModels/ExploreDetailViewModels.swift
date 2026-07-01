@@ -40,7 +40,7 @@ final class GigDetailViewModel: ObservableObject {
     }
 
     var canRequestContact: Bool {
-        gig.status == .open && application == nil && isSubmitting == false
+        gig.isOpenForApplications() && application == nil && isSubmitting == false
     }
 
     var venueDisplayName: String {
@@ -69,6 +69,10 @@ final class GigDetailViewModel: ObservableObject {
     }
 
     var statusText: String {
+        if gig.status == .open && gig.isPast() {
+            return "Pasada"
+        }
+
         switch gig.status {
         case .open:
             return "Abierta"

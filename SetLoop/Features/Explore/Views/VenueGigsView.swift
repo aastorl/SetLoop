@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct VenueGigsView: View {
     @StateObject private var viewModel: VenueGigsViewModel
@@ -24,7 +25,7 @@ struct VenueGigsView: View {
 
                     HStack(spacing: 12) {
                         VenueGigSummaryMetric(title: "Este mes", value: "\(viewModel.monthItems.count)")
-                        VenueGigSummaryMetric(title: "Cerradas/canceladas", value: "\(viewModel.closedOrCancelledCount)")
+                        VenueGigSummaryMetric(title: "Historial", value: "\(viewModel.closedOrCancelledCount)")
                     }
                 }
             }
@@ -45,13 +46,7 @@ struct VenueGigsView: View {
                         onNextMonth: viewModel.moveToNextMonth,
                         onSelectDay: { day in
                             viewModel.select(day)
-                            let dayItems = viewModel.items(on: day.date)
-
-                            if dayItems.isEmpty {
-                                activeSheet = .editor(viewModel.makeCreateContext(on: day.date))
-                            } else {
-                                activeSheet = .day(VenueGigDayAgendaContext(date: day.date))
-                            }
+                            activeSheet = .day(VenueGigDayAgendaContext(date: day.date))
                         }
                     )
                     .padding(.vertical, 6)
@@ -62,7 +57,7 @@ struct VenueGigsView: View {
                 Section {
                     DisclosureGroup(isExpanded: $showsHistory) {
                         if viewModel.closedOrCancelledItems.isEmpty {
-                            Text("Sin fechas cerradas o canceladas.")
+                            Text("Sin fechas pasadas, cerradas o canceladas.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .padding(.vertical, 6)
@@ -70,7 +65,7 @@ struct VenueGigsView: View {
                             gigRows(viewModel.closedOrCancelledItems)
                         }
                     } label: {
-                        Label("Historial cerradas/canceladas", systemImage: "archivebox")
+                        Label("Historial", systemImage: "archivebox")
                             .font(.subheadline.weight(.semibold))
                     }
                 }
@@ -99,6 +94,10 @@ struct VenueGigsView: View {
                     },
                     onEdit: { item in
                         activeSheet = .editor(viewModel.makeEditContext(for: item))
+                    },
+                    canCancel: viewModel.canCancel,
+                    onCancel: { item in
+                        await viewModel.cancel(item)
                     }
                 )
 
@@ -125,7 +124,7 @@ struct VenueGigsView: View {
             VenueGigRow(
                 item: item,
                 onEdit: {
-                    viewModel.edit(item)
+                    activeSheet = .editor(viewModel.makeEditContext(for: item))
                 }
             )
         }
@@ -161,52 +160,101 @@ private struct VenueDayAgendaSheet: View {
     let emptyStateDescription: String
     let onCreate: () -> Void
     let onEdit: (VenueGigItem) -> Void
+    let canCancel: (VenueGigItem) -> Bool
+    let onCancel: (VenueGigItem) async -> Void
+
+    @State private var itemPendingCancellation: VenueGigItem?
+    @State private var isCancelling = false
 
     var body: some View {
         NavigationStack {
             List {
-                if items.isEmpty {
-                    Section {
+                Section("Gestionar fechas creadas") {
+                    if items.isEmpty {
                         ContentUnavailableView(
                             emptyStateTitle,
                             systemImage: "calendar",
                             description: Text(emptyStateDescription)
                         )
-                        .frame(maxWidth: .infinity, minHeight: 180)
-                    }
-                } else {
-                    Section("Fechas del dia") {
+                        .frame(maxWidth: .infinity, minHeight: 150)
+                    } else {
                         ForEach(items) { item in
-                            VenueGigRow(item: item) {
-                                onEdit(item)
-                            }
+                            VenueGigRow(
+                                item: item,
+                                canCancel: canCancel(item),
+                                isCancelDisabled: isCancelling,
+                                onEdit: {
+                                    onEdit(item)
+                                },
+                                onCancel: {
+                                    itemPendingCancellation = item
+                                }
+                            )
                         }
                     }
                 }
             }
+            .alert("Cancelar fecha", isPresented: showsCancellationAlert) {
+                Button("Volver", role: .cancel) {
+                    itemPendingCancellation = nil
+                }
+
+                Button("Cancelar fecha", role: .destructive) {
+                    guard let item = itemPendingCancellation else {
+                        return
+                    }
+
+                    isCancelling = true
+                    Task { @MainActor in
+                        await onCancel(item)
+                        isCancelling = false
+                        itemPendingCancellation = nil
+                    }
+                }
+            } message: {
+                Text("La fecha dejara de aparecer en Explore y sus candidaturas pendientes pasaran a no seleccionadas.")
+            }
             .listStyle(.insetGrouped)
             .navigationTitle(title.capitalized)
             .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) {
-                Button(action: onCreate) {
-                    Label("Nueva fecha este dia", systemImage: "calendar.badge.plus")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(.regularMaterial)
-            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cerrar") {
                         dismiss()
                     }
                 }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(action: onCreate) {
+                        Label("Crear nueva", systemImage: "plus")
+                    }
+                }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([preferredDetent])
+        .presentationDragIndicator(.hidden)
+    }
+
+    private var showsCancellationAlert: Binding<Bool> {
+        Binding(
+            get: { itemPendingCancellation != nil },
+            set: { isPresented in
+                if isPresented == false {
+                    itemPendingCancellation = nil
+                }
+            }
+        )
+    }
+
+    private var preferredDetent: PresentationDetent {
+        switch items.count {
+        case 0:
+            return .height(320)
+        case 1...2:
+            return .medium
+        default:
+            return .large
+        }
     }
 }
 
@@ -357,7 +405,10 @@ private struct VenueGigSummaryMetric: View {
 
 private struct VenueGigRow: View {
     let item: VenueGigItem
+    var canCancel = false
+    var isCancelDisabled = false
     let onEdit: () -> Void
+    var onCancel: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -368,12 +419,12 @@ private struct VenueGigRow: View {
 
                 Spacer(minLength: 8)
 
-                Text(item.status.displayName)
+                Text(statusDisplayName)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(item.status.tint)
+                    .foregroundStyle(statusTint)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
-                    .background(item.status.tint.opacity(0.12))
+                    .background(statusTint.opacity(0.12))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
@@ -397,21 +448,79 @@ private struct VenueGigRow: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 10) {
-                Button(action: onEdit) {
-                    Label("Gestionar", systemImage: "slider.horizontal.3")
+            HStack(spacing: 8) {
+                VenueGigInlineActionButton(
+                    title: "Gestionar",
+                    systemImage: "slider.horizontal.3",
+                    tint: .accentColor,
+                    action: onEdit
+                )
+
+                if canCancel {
+                    VenueGigInlineActionButton(
+                        title: "Cancelar",
+                        systemImage: "xmark.circle",
+                        tint: .red,
+                        action: {
+                            onCancel?()
+                        }
+                    )
+                    .disabled(isCancelDisabled)
                 }
-                    .buttonStyle(.bordered)
             }
             .padding(.top, 2)
         }
         .padding(.vertical, 6)
+    }
+
+    private var statusDisplayName: String {
+        if item.status == .open && item.isPast {
+            return "Pasada"
+        }
+
+        return item.status.displayName
+    }
+
+    private var statusTint: Color {
+        if item.status == .open && item.isPast {
+            return .secondary
+        }
+
+        return item.status.tint
+    }
+}
+
+private struct VenueGigInlineActionButton: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 34)
+                .padding(.horizontal, 10)
+                .foregroundStyle(tint)
+                .background(tint.opacity(0.1))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(tint.opacity(0.22), lineWidth: 1)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
     }
 }
 
 private struct GigEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: GigEditorViewModel
+    @FocusState private var focusedField: GigEditorField?
+    @State private var pendingRole: UserRole?
+    @State private var showsRoleChangeConfirmation = false
 
     init(viewModel: GigEditorViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -422,8 +531,9 @@ private struct GigEditorView: View {
             Form {
                 Section("Datos base") {
                     TextField("Titulo de la fecha", text: $viewModel.title)
+                        .focused($focusedField, equals: .title)
 
-                    Picker("Busco", selection: $viewModel.roleNeeded) {
+                    Picker("Busco", selection: roleSelection) {
                         Text("Musicos").tag(UserRole.musician)
                         Text("DJs").tag(UserRole.dj)
                     }
@@ -431,6 +541,7 @@ private struct GigEditorView: View {
 
                     TextField("Ciudad", text: $viewModel.city)
                         .textInputAutocapitalization(.words)
+                        .focused($focusedField, equals: .city)
 
                     DatePicker(
                         "Fecha",
@@ -442,13 +553,16 @@ private struct GigEditorView: View {
                 Section("Formato de la gig") {
                     TextField("Duracion en minutos", text: $viewModel.durationText)
                         .keyboardType(.numberPad)
+                        .focused($focusedField, equals: .duration)
 
                     HStack(spacing: 12) {
                         TextField("Presupuesto min", text: $viewModel.budgetMinText)
                             .keyboardType(.numberPad)
+                            .focused($focusedField, equals: .budgetMin)
 
                         TextField("Presupuesto max", text: $viewModel.budgetMaxText)
                             .keyboardType(.numberPad)
+                            .focused($focusedField, equals: .budgetMax)
                     }
 
                     Picker("Estado", selection: $viewModel.status) {
@@ -484,6 +598,7 @@ private struct GigEditorView: View {
                         axis: .vertical
                     )
                     .lineLimit(4...7)
+                    .focused($focusedField, equals: .description)
                 }
 
                 if let errorMessage = viewModel.errorMessage {
@@ -492,6 +607,12 @@ private struct GigEditorView: View {
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
+                }
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background {
+                KeyboardDismissTapRecognizer {
+                    dismissKeyboard()
                 }
             }
             .navigationTitle(viewModel.screenTitle)
@@ -516,10 +637,47 @@ private struct GigEditorView: View {
                     .disabled(viewModel.isSaving || !viewModel.canSave)
                 }
             }
+            .alert("Cambiar tipo de fecha", isPresented: $showsRoleChangeConfirmation) {
+                Button("Cancelar", role: .cancel) {
+                    pendingRole = nil
+                }
+
+                Button("Aceptar", role: .destructive) {
+                    guard let pendingRole else {
+                        return
+                    }
+
+                    viewModel.changeRole(to: pendingRole, resettingDraft: true)
+                    self.pendingRole = nil
+                }
+            } message: {
+                Text("Al cambiar entre Musicos y DJs se reiniciaran los datos cargados en esta fecha.")
+            }
         }
     }
 
+    private var roleSelection: Binding<UserRole> {
+        Binding(
+            get: { viewModel.roleNeeded },
+            set: requestRoleChange
+        )
+    }
+
+    private func requestRoleChange(_ newRole: UserRole) {
+        dismissKeyboard()
+
+        guard viewModel.shouldConfirmRoleChange(to: newRole) else {
+            viewModel.changeRole(to: newRole, resettingDraft: false)
+            return
+        }
+
+        pendingRole = newRole
+        showsRoleChangeConfirmation = true
+    }
+
     private func handleSave() {
+        dismissKeyboard()
+
         Task { @MainActor in
             guard await viewModel.save() != nil else {
                 return
@@ -528,6 +686,25 @@ private struct GigEditorView: View {
             dismiss()
         }
     }
+
+    private func dismissKeyboard() {
+        focusedField = nil
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+}
+
+private enum GigEditorField: Hashable {
+    case title
+    case city
+    case duration
+    case budgetMin
+    case budgetMax
+    case description
 }
 
 private extension GigStatus {

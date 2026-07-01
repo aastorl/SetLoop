@@ -2,30 +2,45 @@ import Foundation
 
 enum ProfileOptionCatalog {
     static let genreOptions: [String] = [
-        "Indie",
         "Pop",
         "Rock",
-        "Funk",
-        "Soul",
+        "Indie",
         "Jazz",
-        "House",
-        "Disco",
-        "Techno",
-        "Latin",
+        "Soul",
+        "Funk",
+        "Blues",
+        "Folk",
+        "R&B",
         "Hip Hop",
+        "Latina",
+        "Reggae",
+        "Metal",
+        "Punk",
+        "Flamenco",
+        "Urbano",
+        "Electronica",
         "Acustico"
     ]
 
     static let venueDJGenreOptions: [String] = [
+        "Open Format",
         "House",
-        "Disco",
         "Tech House",
-        "Techno",
-        "Funk",
+        "Deep House",
+        "Afro House",
+        "Disco",
         "Soul",
+        "Funk",
         "Hip Hop",
+        "Reggaeton",
+        "Urbano",
         "Latin",
-        "Open Format"
+        "Pop / Hits",
+        "Techno",
+        "Melodic Techno",
+        "Minimal",
+        "Drum & Bass",
+        "Trance"
     ]
 
     static let musicianFormationOptions: [String] = [

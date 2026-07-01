@@ -2,12 +2,16 @@ import SwiftUI
 
 struct BookingView: View {
     @StateObject private var viewModel: BookingViewModel
+    @Binding private var targetApplicationID: UUID?
+    @State private var presentedApplication: BookingApplicationRoute?
 
     init(
         currentProfile: UserProfile,
         applicationStore: ApplicationStore,
-        gigStore: GigStore
+        gigStore: GigStore,
+        targetApplicationID: Binding<UUID?> = .constant(nil)
     ) {
+        _targetApplicationID = targetApplicationID
         _viewModel = StateObject(
             wrappedValue: BookingViewModel(
                 applicationStore: applicationStore,
@@ -72,7 +76,38 @@ struct BookingView: View {
             .task {
                 await viewModel.load()
             }
+            .task(id: targetApplicationID) {
+                guard let applicationID = targetApplicationID else {
+                    return
+                }
+
+                await openApplication(applicationID)
+            }
+            .sheet(item: $presentedApplication, onDismiss: {
+                targetApplicationID = nil
+            }) { route in
+                BookingApplicationDetailView(
+                    viewModel: viewModel,
+                    applicationID: route.id
+                )
+            }
         }
+    }
+
+    @MainActor
+    private func openApplication(_ applicationID: UUID) async {
+        if viewModel.item(applicationID: applicationID) == nil {
+            await viewModel.load()
+        }
+
+        guard let item = viewModel.item(applicationID: applicationID) else {
+            viewModel.showUnavailableApplicationMessage()
+            targetApplicationID = nil
+            return
+        }
+
+        viewModel.prepareForPresentation(item)
+        presentedApplication = BookingApplicationRoute(id: applicationID)
     }
 
     private var applicationList: some View {
@@ -81,6 +116,17 @@ struct BookingView: View {
                 Section(section.title) {
                     ForEach(section.items) { item in
                         bookingRow(item)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if viewModel.canDelete(item) {
+                                    Button(role: .destructive) {
+                                        Task {
+                                            await viewModel.deleteAsync(item)
+                                        }
+                                    } label: {
+                                        Label("Eliminar", systemImage: "trash")
+                                    }
+                                }
+                            }
                     }
                 }
             }
@@ -114,6 +160,17 @@ struct BookingView: View {
                 } else {
                     ForEach(viewModel.selectedDayCalendarItems) { item in
                         bookingRow(item)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if viewModel.canDelete(item) {
+                                    Button(role: .destructive) {
+                                        Task {
+                                            await viewModel.deleteAsync(item)
+                                        }
+                                    } label: {
+                                        Label("Eliminar", systemImage: "trash")
+                                    }
+                                }
+                            }
                     }
                 }
             }
@@ -136,6 +193,58 @@ struct BookingView: View {
                 }
             }
         )
+    }
+}
+
+private struct BookingApplicationRoute: Identifiable {
+    let id: UUID
+}
+
+private struct BookingApplicationDetailView: View {
+    @ObservedObject var viewModel: BookingViewModel
+    let applicationID: UUID
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let item = viewModel.item(applicationID: applicationID) {
+                    ScrollView {
+                        BookingApplicationRow(
+                            item: item,
+                            isUpdating: viewModel.isUpdating,
+                            onAccept: {
+                                Task {
+                                    await viewModel.acceptAsync(item)
+                                }
+                            },
+                            onReject: {
+                                Task {
+                                    await viewModel.rejectAsync(item)
+                                }
+                            }
+                        )
+                        .padding(20)
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "Candidatura no disponible",
+                        systemImage: "tray",
+                        description: Text("Puede haber sido eliminada o ya no estar disponible.")
+                    )
+                }
+            }
+            .navigationTitle("Candidatura")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Cerrar") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

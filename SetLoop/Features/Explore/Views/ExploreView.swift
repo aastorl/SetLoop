@@ -132,7 +132,7 @@ struct ExploreView: View {
                 emptyText: "Sin fechas activas o proximas."
             )
             venueDashboardSection(
-                title: "Cerradas y canceladas",
+                title: "Historial",
                 systemImage: "checkmark.seal",
                 gigs: hostClosedOrCancelledGigs,
                 emptyText: nil
@@ -158,7 +158,7 @@ struct ExploreView: View {
             LazyVGrid(columns: venueMetricColumns, spacing: 12) {
                 VenueMetricPill(title: "Activas", value: "\(hostActiveGigCount)")
                 VenueMetricPill(title: "Proximas", value: "\(hostUpcomingGigCount)")
-                VenueMetricPill(title: "Cerradas/canceladas", value: "\(hostClosedOrCancelledGigCount)")
+                VenueMetricPill(title: "Historial", value: "\(hostClosedOrCancelledGigCount)")
             }
 
             NavigationLink {
@@ -374,7 +374,7 @@ struct ExploreView: View {
     }
 
     private var hostActiveGigCount: Int {
-        hostGigs.filter { $0.status == .open }.count
+        hostGigs.filter { $0.isOpenForApplications() }.count
     }
 
     private var hostUpcomingGigCount: Int {
@@ -383,7 +383,7 @@ struct ExploreView: View {
     }
 
     private var hostClosedOrCancelledGigCount: Int {
-        hostGigs.filter { $0.status == .booked || $0.status == .cancelled }.count
+        hostClosedOrCancelledGigs.count
     }
 
     private var hostPendingReviewGigs: [Gig] {
@@ -402,12 +402,12 @@ struct ExploreView: View {
     }
 
     private var hostActiveUpcomingGigs: [Gig] {
-        hostGigs.filter { $0.status == .open }
+        hostGigs.filter { $0.isOpenForApplications() }
     }
 
     private var hostClosedOrCancelledGigs: [Gig] {
         return hostGigs
-            .filter { $0.status == .booked || $0.status == .cancelled }
+            .filter { $0.status == .booked || $0.status == .cancelled || $0.isPast() }
             .sorted { $0.performanceDate > $1.performanceDate }
     }
 

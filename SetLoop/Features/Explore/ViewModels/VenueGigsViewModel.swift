@@ -6,6 +6,7 @@ final class VenueGigsViewModel: ObservableObject {
     @Published private(set) var items: [VenueGigItem] = []
     @Published var editorContext: VenueGigEditorContext?
     @Published private(set) var isLoading = false
+    @Published private(set) var isUpdatingStatus = false
     @Published var errorMessage: String?
     @Published var visibleMonth: Date
     @Published var selectedDate: Date
@@ -57,7 +58,7 @@ final class VenueGigsViewModel: ObservableObject {
     }
 
     var openCount: Int {
-        items.filter { $0.status == .open }.count
+        items.filter { $0.isOpenForApplications(calendar: calendar) }.count
     }
 
     var upcomingCount: Int {
@@ -66,7 +67,7 @@ final class VenueGigsViewModel: ObservableObject {
     }
 
     var closedOrCancelledCount: Int {
-        items.filter { $0.status == .booked || $0.status == .cancelled }.count
+        historicalItems.count
     }
 
     var pendingApplicationCount: Int {
@@ -125,8 +126,8 @@ final class VenueGigsViewModel: ObservableObject {
                     isToday: calendar.isDateInToday(date),
                     isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
                     gigsCount: dayItems.count,
-                    hasOpenGigs: dayItems.contains { $0.status == .open },
-                    hasClosedOrCancelledGigs: dayItems.contains { $0.status == .booked || $0.status == .cancelled }
+                    hasOpenGigs: dayItems.contains { $0.isOpenForApplications(calendar: calendar) },
+                    hasClosedOrCancelledGigs: dayItems.contains { $0.isHistorical(calendar: calendar) }
                 )
             }
 
@@ -147,13 +148,11 @@ final class VenueGigsViewModel: ObservableObject {
     }
 
     var activeUpcomingItems: [VenueGigItem] {
-        items.filter { $0.status == .open }
+        items.filter { $0.isOpenForApplications(calendar: calendar) }
     }
 
     var closedOrCancelledItems: [VenueGigItem] {
-        return items
-            .filter { $0.status == .booked || $0.status == .cancelled }
-            .sorted { $0.performanceDate > $1.performanceDate }
+        historicalItems
     }
 
     func startCreating(on date: Date? = nil) {
@@ -187,6 +186,36 @@ final class VenueGigsViewModel: ObservableObject {
 
     func moveToNextMonth() {
         moveVisibleMonth(by: 1)
+    }
+
+    func canCancel(_ item: VenueGigItem) -> Bool {
+        item.isOpenForApplications(calendar: calendar)
+    }
+
+    func cancel(_ item: VenueGigItem) async {
+        guard canCancel(item), isUpdatingStatus == false else {
+            return
+        }
+
+        isUpdatingStatus = true
+        errorMessage = nil
+        defer { isUpdatingStatus = false }
+
+        do {
+            _ = try await gigStore.saveStatus(gigID: item.id, status: .cancelled)
+
+            let pendingApplications = applicationStore.applications
+                .filter { $0.gigID == item.id && $0.status == .pending }
+
+            for application in pendingApplications {
+                _ = try await applicationStore.saveStatus(applicationID: application.id, status: .rejected)
+            }
+
+            errorMessage = nil
+            reload()
+        } catch {
+            errorMessage = error.setLoopUserMessage
+        }
     }
 
     func load() async {
@@ -265,6 +294,12 @@ final class VenueGigsViewModel: ObservableObject {
             return error.setLoopUserMessage
         }
     }
+
+    private var historicalItems: [VenueGigItem] {
+        items
+            .filter { $0.isHistorical(calendar: calendar) }
+            .sorted { $0.performanceDate > $1.performanceDate }
+    }
 }
 
 struct VenueGigEditorContext: Identifiable {
@@ -304,6 +339,9 @@ struct VenueGigItem: Identifiable, Equatable {
     var performanceDate: Date { gig.performanceDate }
     var status: GigStatus { gig.status }
     var roleNeeded: UserRole { gig.roleNeeded }
+    var isPast: Bool {
+        gig.isPast()
+    }
     var venueName: String { gig.venueName ?? "Tu local" }
     var budgetText: String {
         switch (gig.budgetMin, gig.budgetMax) {
@@ -316,6 +354,18 @@ struct VenueGigItem: Identifiable, Equatable {
         case (nil, nil):
             return "Presupuesto por acordar"
         }
+    }
+
+    func isPast(referenceDate: Date = Date(), calendar: Calendar = .current) -> Bool {
+        gig.isPast(referenceDate: referenceDate, calendar: calendar)
+    }
+
+    func isOpenForApplications(referenceDate: Date = Date(), calendar: Calendar = .current) -> Bool {
+        gig.isOpenForApplications(referenceDate: referenceDate, calendar: calendar)
+    }
+
+    func isHistorical(referenceDate: Date = Date(), calendar: Calendar = .current) -> Bool {
+        status == .booked || status == .cancelled || isPast(referenceDate: referenceDate, calendar: calendar)
     }
 }
 
@@ -338,6 +388,9 @@ final class GigEditorViewModel: ObservableObject {
     private let gigStore: GigStore
     private let venueStore: VenueStore
     private let existingGig: Gig?
+    private let defaultCity: String
+    private let defaultPerformanceDate: Date
+    private let defaultStatus: GigStatus
 
     init(
         currentProfile: UserProfile,
@@ -355,16 +408,23 @@ final class GigEditorViewModel: ObservableObject {
             Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: $0)
         }
 
+        let initialCity = gig?.city ?? associatedVenue?.city ?? currentProfile.city
+        let initialPerformanceDate = gig?.performanceDate ?? creationDate ?? Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
+        let initialStatus = gig?.status ?? .open
+
+        self.defaultCity = initialCity
+        self.defaultPerformanceDate = initialPerformanceDate
+        self.defaultStatus = initialStatus
         self.title = gig?.title ?? ""
-        self.city = gig?.city ?? associatedVenue?.city ?? currentProfile.city
-        self.performanceDate = gig?.performanceDate ?? creationDate ?? Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
+        self.city = initialCity
+        self.performanceDate = initialPerformanceDate
         self.durationText = gig?.durationMinutes.map(String.init) ?? ""
         self.budgetMinText = gig?.budgetMin.map(String.init) ?? ""
         self.budgetMaxText = gig?.budgetMax.map(String.init) ?? ""
         self.roleNeeded = gig?.roleNeeded ?? .musician
         self.selectedGenres = gig?.requiredGenres ?? []
         self.gigDescription = gig?.description ?? ""
-        self.status = gig?.status ?? .open
+        self.status = initialStatus
     }
 
     var screenTitle: String {
@@ -410,6 +470,28 @@ final class GigEditorViewModel: ObservableObject {
         } else {
             selectedGenres.append(genre)
         }
+    }
+
+    func shouldConfirmRoleChange(to newRole: UserRole) -> Bool {
+        guard existingGig == nil, newRole != roleNeeded else {
+            return false
+        }
+
+        return hasDraftContent
+    }
+
+    func changeRole(to newRole: UserRole, resettingDraft: Bool) {
+        guard newRole != roleNeeded else {
+            return
+        }
+
+        if resettingDraft && existingGig == nil {
+            resetDraft(for: newRole)
+            return
+        }
+
+        roleNeeded = newRole
+        selectedGenres = []
     }
 
     func save() async -> Gig? {
@@ -460,9 +542,39 @@ final class GigEditorViewModel: ObservableObject {
             return nil
         }
     }
+
+    private var hasDraftContent: Bool {
+        title.trimmedForDraft.isEmpty == false
+            || city.trimmedForDraft != defaultCity.trimmedForDraft
+            || performanceDate != defaultPerformanceDate
+            || durationText.trimmedForDraft.isEmpty == false
+            || budgetMinText.trimmedForDraft.isEmpty == false
+            || budgetMaxText.trimmedForDraft.isEmpty == false
+            || selectedGenres.isEmpty == false
+            || gigDescription.trimmedForDraft.isEmpty == false
+            || status != defaultStatus
+    }
+
+    private func resetDraft(for newRole: UserRole) {
+        title = ""
+        city = defaultCity
+        performanceDate = defaultPerformanceDate
+        durationText = ""
+        budgetMinText = ""
+        budgetMaxText = ""
+        roleNeeded = newRole
+        selectedGenres = []
+        gigDescription = ""
+        status = defaultStatus
+        errorMessage = nil
+    }
 }
 
 private extension String {
+    var trimmedForDraft: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var nilIfEmpty: String? {
         isEmpty ? nil : self
     }

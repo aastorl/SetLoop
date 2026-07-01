@@ -50,7 +50,7 @@ final class GigStore: ObservableObject {
 
     func openGigs(for role: UserRole) -> [Gig] {
         gigs
-            .filter { $0.status == .open && $0.roleNeeded == role }
+            .filter { $0.isOpenForApplications() && $0.roleNeeded == role }
             .sorted { $0.performanceDate < $1.performanceDate }
     }
 

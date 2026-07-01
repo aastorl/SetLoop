@@ -87,6 +87,7 @@ private struct ProfileEditorScreen: View {
     let onProfileSaved: (@MainActor (UserProfile) -> Void)?
     let onSignOut: () -> Void
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var selectedVenueGenreTarget: UserRole = .musician
     @FocusState private var focusedField: ProfileEditorField?
 
     var body: some View {
@@ -151,28 +152,32 @@ private struct ProfileEditorScreen: View {
                         .foregroundStyle(.secondary)
                 }
             } else if viewModel.profile.role == .venue {
-                Section("Generos para bandas") {
-                    ForEach(viewModel.genreOptions, id: \.self) { option in
-                        ProfileSelectionRow(
-                            title: option,
-                            isSelected: viewModel.isGenreSelected(option),
-                            action: { viewModel.toggleGenre(option) }
-                        )
+                Section("Generos deseados") {
+                    Picker("Tipo de fecha", selection: $selectedVenueGenreTarget) {
+                        Text("Musicos").tag(UserRole.musician)
+                        Text("DJs").tag(UserRole.dj)
                     }
-                    Text("Usamos esta seccion para priorizar bandas y proyectos en directo.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
+                    .pickerStyle(.segmented)
 
-                Section("Generos para DJs") {
-                    ForEach(viewModel.venueDJGenreOptions, id: \.self) { option in
-                        ProfileSelectionRow(
-                            title: option,
-                            isSelected: viewModel.isVenueDJGenreSelected(option),
-                            action: { viewModel.toggleVenueDJGenre(option) }
-                        )
+                    if selectedVenueGenreTarget == .dj {
+                        ForEach(viewModel.venueDJGenreOptions, id: \.self) { option in
+                            ProfileSelectionRow(
+                                title: option,
+                                isSelected: viewModel.isVenueDJGenreSelected(option),
+                                action: { viewModel.toggleVenueDJGenre(option) }
+                            )
+                        }
+                    } else {
+                        ForEach(viewModel.genreOptions, id: \.self) { option in
+                            ProfileSelectionRow(
+                                title: option,
+                                isSelected: viewModel.isGenreSelected(option),
+                                action: { viewModel.toggleGenre(option) }
+                            )
+                        }
                     }
-                    Text("Usamos esta seccion para priorizar perfiles DJ y sesiones de club.")
+
+                    Text(venueGenreHelperText)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -274,36 +279,51 @@ private struct ProfileEditorScreen: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                Divider()
+            if viewModel.showsPrimaryActionButton {
+                VStack(spacing: 0) {
+                    Divider()
 
-                Button {
-                    handleSaveTap()
-                } label: {
-                    HStack {
-                        if viewModel.isSaving {
-                            ProgressView()
-                                .tint(.white)
+                    Button {
+                        handleSaveTap()
+                    } label: {
+                        HStack {
+                            if viewModel.isSaving {
+                                ProgressView()
+                                    .tint(.white)
+                            }
+
+                            if viewModel.showsSaveConfirmation {
+                                Image(systemName: "checkmark.circle.fill")
+                            }
+
+                            Text(viewModel.buttonTitle)
+                                .fontWeight(.semibold)
                         }
-
-                        if viewModel.showsSaveConfirmation {
-                            Image(systemName: "checkmark.circle.fill")
-                        }
-
-                        Text(viewModel.buttonTitle)
-                            .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
                     }
-                    .frame(maxWidth: .infinity)
+                    .buttonStyle(.borderedProminent)
+                    .tint(viewModel.showsSaveConfirmation ? .green : .accentColor)
+                    .controlSize(.large)
+                    .disabled(viewModel.isSaving || !viewModel.canSave)
+                    .accessibilityIdentifier("profile.saveButton")
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(viewModel.showsSaveConfirmation ? .green : .accentColor)
-                .controlSize(.large)
-                .disabled(viewModel.isSaving || !viewModel.canSave)
-                .accessibilityIdentifier("profile.saveButton")
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .background(.bar)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .background(.bar)
+        }
+        .animation(.easeInOut(duration: 0.2), value: viewModel.showsPrimaryActionButton)
+    }
+
+    private var venueGenreHelperText: String {
+        switch selectedVenueGenreTarget {
+        case .musician:
+            return "Usamos estos generos para priorizar bandas y proyectos en directo."
+        case .dj:
+            return "Usamos estos estilos para priorizar DJs y sesiones de club."
+        case .venue:
+            return ""
         }
     }
 
@@ -337,108 +357,6 @@ private enum ProfileEditorField: Hashable {
     case venueAddress
     case venueCapacity
     case bio
-}
-
-private struct KeyboardDismissTapRecognizer: UIViewRepresentable {
-    let onTapOutsideInput: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onTapOutsideInput: onTapOutsideInput)
-    }
-
-    func makeUIView(context: Context) -> WindowObserverView {
-        let view = WindowObserverView()
-        view.onWindowChange = { [weak coordinator = context.coordinator] window in
-            coordinator?.attach(to: window)
-        }
-        return view
-    }
-
-    func updateUIView(_ uiView: WindowObserverView, context: Context) {
-        context.coordinator.onTapOutsideInput = onTapOutsideInput
-    }
-
-    static func dismantleUIView(_ uiView: WindowObserverView, coordinator: Coordinator) {
-        coordinator.detach()
-    }
-
-    final class WindowObserverView: UIView {
-        var onWindowChange: ((UIWindow?) -> Void)?
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            onWindowChange?(window)
-        }
-    }
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var onTapOutsideInput: () -> Void
-        private weak var window: UIWindow?
-        private weak var recognizer: UITapGestureRecognizer?
-
-        init(onTapOutsideInput: @escaping () -> Void) {
-            self.onTapOutsideInput = onTapOutsideInput
-        }
-
-        func attach(to window: UIWindow?) {
-            guard let window else {
-                detach()
-                return
-            }
-
-            guard self.window !== window else {
-                return
-            }
-
-            detach()
-
-            let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-            recognizer.cancelsTouchesInView = false
-            recognizer.delegate = self
-            window.addGestureRecognizer(recognizer)
-
-            self.window = window
-            self.recognizer = recognizer
-        }
-
-        func detach() {
-            if let recognizer, let window {
-                window.removeGestureRecognizer(recognizer)
-            }
-
-            recognizer = nil
-            window = nil
-        }
-
-        @objc private func handleTap() {
-            onTapOutsideInput()
-        }
-
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-            isTextInput(touch.view) == false
-        }
-
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            true
-        }
-
-        private func isTextInput(_ view: UIView?) -> Bool {
-            var currentView = view
-
-            while let candidate = currentView {
-                if candidate is UITextField || candidate is UITextView {
-                    return true
-                }
-
-                currentView = candidate.superview
-            }
-
-            return false
-        }
-    }
 }
 
 private struct ProfileAvatarPicker: View {
