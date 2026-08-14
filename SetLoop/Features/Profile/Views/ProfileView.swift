@@ -88,6 +88,7 @@ private struct ProfileEditorScreen: View {
     let onSignOut: () -> Void
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var selectedVenueGenreTarget: UserRole = .musician
+    @State private var showsVenueAddressSearch = false
     @FocusState private var focusedField: ProfileEditorField?
 
     var body: some View {
@@ -131,10 +132,36 @@ private struct ProfileEditorScreen: View {
                     .accessibilityIdentifier("profile.cityField")
 
                 if viewModel.profile.role == .venue {
-                    TextField("Direccion", text: $viewModel.venueAddress)
-                        .textInputAutocapitalization(.words)
-                        .focused($focusedField, equals: .venueAddress)
-                        .accessibilityIdentifier("profile.venueAddressField")
+                    Button {
+                        dismissKeyboard()
+                        showsVenueAddressSearch = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "mappin.and.ellipse")
+                                .foregroundStyle(Color.accentColor)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(viewModel.venueAddress.isEmpty ? "Buscar direccion" : viewModel.venueAddress)
+                                    .foregroundStyle(.primary)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                if viewModel.venuePlaceName.isEmpty == false {
+                                    Text(viewModel.venuePlaceName)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("profile.venueAddressButton")
                 }
             }
 
@@ -314,6 +341,44 @@ private struct ProfileEditorScreen: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: viewModel.showsPrimaryActionButton)
+        .fullScreenCover(isPresented: $showsVenueAddressSearch) {
+            VenueAddressSearchSheet(
+                initialQuery: venueAddressSearchInitialQuery,
+                initialSelection: venueAddressInitialSelection
+            ) { selection in
+                viewModel.applyVenueAddressSelection(selection)
+            }
+        }
+    }
+
+    private var venueAddressSearchInitialQuery: String {
+        let address = viewModel.venueAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = viewModel.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let city = viewModel.city.trimmingCharacters(in: .whitespacesAndNewlines)
+        let primaryQuery = address.isEmpty ? displayName : address
+
+        return [primaryQuery, city]
+            .filter { $0.isEmpty == false }
+            .joined(separator: ", ")
+    }
+
+    private var venueAddressInitialSelection: VenueAddressSelection? {
+        let address = viewModel.venueAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard address.isEmpty == false else {
+            return nil
+        }
+
+        let placeName = viewModel.venuePlaceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let city = viewModel.city.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return VenueAddressSelection(
+            placeName: placeName.isEmpty ? nil : placeName,
+            address: address,
+            city: city.isEmpty ? nil : city,
+            latitude: viewModel.venueLatitude,
+            longitude: viewModel.venueLongitude
+        )
     }
 
     private var venueGenreHelperText: String {
@@ -354,7 +419,6 @@ private struct ProfileEditorScreen: View {
 private enum ProfileEditorField: Hashable {
     case displayName
     case city
-    case venueAddress
     case venueCapacity
     case bio
 }

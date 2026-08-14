@@ -255,6 +255,7 @@ final class ApplicationStore: ObservableObject {
             applicantDisplayName: applicantProfile.displayName,
             applicantRole: applicantProfile.role,
             applicantCity: applicantProfile.city,
+            applicantAvatarURL: applicantProfile.avatarURL,
             message: message.trimmingCharacters(in: .whitespacesAndNewlines),
             status: .pending,
             createdAt: now,

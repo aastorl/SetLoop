@@ -45,6 +45,9 @@ struct ContentView: View {
                 }
             }
         }
+        .onOpenURL { url in
+            _ = authViewModel.handlePasswordRecoveryURL(url)
+        }
     }
 }
 

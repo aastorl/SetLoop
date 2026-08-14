@@ -133,8 +133,8 @@ final class VenueStore: ObservableObject {
             description: profile.bioText.isEmpty ? nil : profile.bioText,
             genres: allGenres,
             imageURL: profile.avatarURL,
-            latitude: existingVenue?.latitude,
-            longitude: existingVenue?.longitude,
+            latitude: profile.venueLatitude ?? existingVenue?.latitude,
+            longitude: profile.venueLongitude ?? existingVenue?.longitude,
             isVerified: existingVenue?.isVerified ?? false,
             createdAt: existingVenue?.createdAt ?? now,
             updatedAt: now

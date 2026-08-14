@@ -90,24 +90,30 @@ final class SearchService: SearchServicing {
 enum ExploreCardFactory {
     static func makeCards(
         gigs: [Gig],
+        venues: [Venue] = [],
         referenceDate: Date = Date(),
         calendar: Calendar = .current
     ) -> [ExploreCardItem] {
-        gigs
+        let venuesByID = Dictionary(uniqueKeysWithValues: venues.map { ($0.id, $0) })
+        let venuesByOwnerID = Dictionary(uniqueKeysWithValues: venues.map { ($0.ownerID, $0) })
+
+        return gigs
             .filter { $0.isOpenForApplications(referenceDate: referenceDate, calendar: calendar) }
             .map { gig in
-                ExploreCardItem(
+                let venue = gig.venueID.flatMap { venuesByID[$0] } ?? venuesByOwnerID[gig.hostUserID]
+
+                return ExploreCardItem(
                     id: gig.id,
                     kind: .gig,
                     title: gig.title,
-                    subtitle: gig.venueName ?? "Fecha publicada",
+                    subtitle: gig.venueName ?? venue?.name ?? "Fecha publicada",
                     city: gig.city,
                     detail: "\(gig.durationMinutes ?? 60) min",
                     date: gig.performanceDate,
                     role: gig.roleNeeded,
                     priceText: budgetText(min: gig.budgetMin, max: gig.budgetMax, currency: gig.currency),
                     tags: gig.requiredGenres,
-                    imageURL: gig.imageURL,
+                    imageURL: gig.imageURL ?? venue?.imageURL,
                     symbolName: "calendar.badge.clock"
                 )
             }

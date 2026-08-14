@@ -38,7 +38,8 @@ struct ExploreView: View {
                 searchService: SearchService(
                     itemsProvider: {
                         ExploreCardFactory.makeCards(
-                            gigs: gigStore.gigs
+                            gigs: gigStore.gigs,
+                            venues: venueStore.venues
                         )
                     }
                 )
@@ -440,24 +441,11 @@ private struct ExploreCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ZStack(alignment: .topTrailing) {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.secondarySystemBackground))
-                    .aspectRatio(1.18, contentMode: .fit)
-
-                Image(systemName: item.symbolName)
-                    .font(.system(size: 36, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                Text(item.kind.displayName)
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(.thinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .padding(8)
-            }
+            ExploreCardImageView(
+                imageURL: item.imageURL,
+                symbolName: item.symbolName,
+                badge: item.kind.displayName
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
@@ -499,6 +487,62 @@ private struct ExploreCardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ExploreCardImageView: View {
+    let imageURL: URL?
+    let symbolName: String
+    let badge: String
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let imageURL {
+                    AsyncImage(url: imageURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        case .empty:
+                            placeholder(showsProgress: true)
+                        case .failure:
+                            placeholder(showsProgress: false)
+                        @unknown default:
+                            placeholder(showsProgress: false)
+                        }
+                    }
+                } else {
+                    placeholder(showsProgress: false)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .aspectRatio(1.18, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            Text(badge)
+                .font(.caption2.bold())
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(8)
+        }
+    }
+
+    private func placeholder(showsProgress: Bool) -> some View {
+        ZStack {
+            Color(.secondarySystemBackground)
+
+            if showsProgress {
+                ProgressView()
+            } else {
+                Image(systemName: symbolName)
+                    .font(.system(size: 36, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

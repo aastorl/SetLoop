@@ -12,6 +12,9 @@ final class ProfileViewModel: ObservableObject {
     @Published var displayName: String
     @Published var city: String
     @Published var venueAddress: String
+    @Published var venuePlaceName: String
+    @Published var venueLatitude: Double?
+    @Published var venueLongitude: Double?
     @Published var selectedGenres: [String]
     @Published var selectedVenueDJGenres: [String]
     @Published var selectedMusicianFormations: [String]
@@ -45,6 +48,9 @@ final class ProfileViewModel: ObservableObject {
         self.displayName = profile.displayName
         self.city = profile.city
         self.venueAddress = profile.venueAddressText
+        self.venuePlaceName = profile.venuePlaceNameText
+        self.venueLatitude = profile.venueLatitude
+        self.venueLongitude = profile.venueLongitude
         self.selectedGenres = profile.genres
         self.selectedVenueDJGenres = profile.role == .venue ? profile.instruments : []
         self.selectedMusicianFormations = profile.instruments.filter { ProfileOptionCatalog.musicianFormationOptions.contains($0) }
@@ -171,7 +177,12 @@ final class ProfileViewModel: ObservableObject {
     }
 
     var canSave: Bool {
-        draftProfile.isProfileComplete && (mode == .onboarding || hasPendingChanges)
+        switch mode {
+        case .onboarding:
+            return draftProfile.isProfileComplete
+        case .profile:
+            return hasPendingChanges
+        }
     }
 
     var showsPrimaryActionButton: Bool {
@@ -201,6 +212,9 @@ final class ProfileViewModel: ObservableObject {
             displayName = savedProfile.displayName
             city = savedProfile.city
             venueAddress = savedProfile.venueAddressText
+            venuePlaceName = savedProfile.venuePlaceNameText
+            venueLatitude = savedProfile.venueLatitude
+            venueLongitude = savedProfile.venueLongitude
             selectedGenres = savedProfile.genres
             selectedVenueDJGenres = savedProfile.role == .venue ? savedProfile.instruments : []
             selectedMusicianFormations = savedProfile.instruments.filter { ProfileOptionCatalog.musicianFormationOptions.contains($0) }
@@ -223,6 +237,9 @@ final class ProfileViewModel: ObservableObject {
         displayName = profile.displayName
         city = profile.city
         venueAddress = profile.venueAddressText
+        venuePlaceName = profile.venuePlaceNameText
+        venueLatitude = profile.venueLatitude
+        venueLongitude = profile.venueLongitude
         selectedGenres = profile.genres
         selectedVenueDJGenres = profile.role == .venue ? profile.instruments : []
         selectedMusicianFormations = profile.instruments.filter { ProfileOptionCatalog.musicianFormationOptions.contains($0) }
@@ -264,6 +281,29 @@ final class ProfileViewModel: ObservableObject {
 
     func setAvatarImageData(_ data: Data?) {
         avatarImageData = data
+        lastSavedAt = nil
+    }
+
+    func updateVenueAddressManually(_ address: String) {
+        venueAddress = address
+        venuePlaceName = ""
+        venueLatitude = nil
+        venueLongitude = nil
+        lastSavedAt = nil
+    }
+
+    func applyVenueAddressSelection(_ selection: VenueAddressSelection) {
+        venueAddress = selection.address
+        venuePlaceName = selection.placeName ?? ""
+        venueLatitude = selection.latitude
+        venueLongitude = selection.longitude
+
+        if let selectedCity = selection.city?.trimmingCharacters(in: .whitespacesAndNewlines),
+           selectedCity.isEmpty == false,
+           city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            city = selectedCity
+        }
+
         lastSavedAt = nil
     }
 
@@ -322,6 +362,12 @@ final class ProfileViewModel: ObservableObject {
         updatedProfile.city = city.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedVenueAddress = venueAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         updatedProfile.venueAddress = trimmedVenueAddress.isEmpty ? nil : trimmedVenueAddress
+        let trimmedVenuePlaceName = venuePlaceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        updatedProfile.venuePlaceName = trimmedVenueAddress.isEmpty || trimmedVenuePlaceName.isEmpty
+            ? nil
+            : trimmedVenuePlaceName
+        updatedProfile.venueLatitude = trimmedVenueAddress.isEmpty ? nil : venueLatitude
+        updatedProfile.venueLongitude = trimmedVenueAddress.isEmpty ? nil : venueLongitude
         updatedProfile.bio = bio.trimmingCharacters(in: .whitespacesAndNewlines)
         updatedProfile.genres = selectedGenres
 
@@ -330,11 +376,19 @@ final class ProfileViewModel: ObservableObject {
             updatedProfile.instruments = selectedMusicianFormations + selectedMusicianInstruments
             updatedProfile.instrumentCounts = musicianInstrumentCounts.filter { selectedMusicianInstruments.contains($0.key) }
             updatedProfile.venueCapacity = nil
+            updatedProfile.venueAddress = nil
+            updatedProfile.venuePlaceName = nil
+            updatedProfile.venueLatitude = nil
+            updatedProfile.venueLongitude = nil
         case .dj:
             updatedProfile.genres = []
             updatedProfile.instruments = selectedDJDetails
             updatedProfile.instrumentCounts = [:]
             updatedProfile.venueCapacity = nil
+            updatedProfile.venueAddress = nil
+            updatedProfile.venuePlaceName = nil
+            updatedProfile.venueLatitude = nil
+            updatedProfile.venueLongitude = nil
         case .venue:
             updatedProfile.instruments = selectedVenueDJGenres
             updatedProfile.instrumentCounts = [:]
@@ -370,6 +424,9 @@ private struct ProfileSnapshot: Equatable {
     let displayName: String
     let city: String
     let venueAddress: String
+    let venuePlaceName: String
+    let venueLatitude: Double?
+    let venueLongitude: Double?
     let bio: String
     let genres: [String]
     let instruments: [String]
@@ -379,7 +436,17 @@ private struct ProfileSnapshot: Equatable {
     init(profile: UserProfile) {
         displayName = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         city = profile.city.trimmingCharacters(in: .whitespacesAndNewlines)
-        venueAddress = profile.venueAddressText
+        if profile.role == .venue {
+            venueAddress = profile.venueAddressText
+            venuePlaceName = profile.venuePlaceNameText
+            venueLatitude = profile.venueLatitude
+            venueLongitude = profile.venueLongitude
+        } else {
+            venueAddress = ""
+            venuePlaceName = ""
+            venueLatitude = nil
+            venueLongitude = nil
+        }
         bio = profile.bioText
         genres = profile.genres
         instruments = profile.instruments

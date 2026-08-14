@@ -7,6 +7,9 @@ struct UserProfile: Identifiable, Codable, Equatable {
     var role: UserRole
     var city: String
     var venueAddress: String? // Direccion publica para la ficha del local o promotora.
+    var venuePlaceName: String? // Nombre devuelto por MapKit cuando el local se selecciona desde busqueda.
+    var venueLatitude: Double? // Coordenada opcional para ordenar/mostrar locales en mapas.
+    var venueLongitude: Double? // Coordenada opcional para abrir el local en mapas.
     var bio: String?
     var avatarURL: URL?
     var genres: [String]
@@ -24,6 +27,9 @@ struct UserProfile: Identifiable, Codable, Equatable {
         case role
         case city
         case venueAddress = "venue_address"
+        case venuePlaceName = "venue_place_name"
+        case venueLatitude = "venue_latitude"
+        case venueLongitude = "venue_longitude"
         case bio
         case avatarURL = "avatar_url"
         case genres
@@ -42,6 +48,9 @@ struct UserProfile: Identifiable, Codable, Equatable {
         role: UserRole,
         city: String,
         venueAddress: String? = nil,
+        venuePlaceName: String? = nil,
+        venueLatitude: Double? = nil,
+        venueLongitude: Double? = nil,
         bio: String? = nil,
         avatarURL: URL? = nil,
         genres: [String] = [],
@@ -58,6 +67,9 @@ struct UserProfile: Identifiable, Codable, Equatable {
         self.role = role
         self.city = city
         self.venueAddress = venueAddress
+        self.venuePlaceName = venuePlaceName
+        self.venueLatitude = venueLatitude
+        self.venueLongitude = venueLongitude
         self.bio = bio
         self.avatarURL = avatarURL
         self.genres = genres
@@ -78,6 +90,9 @@ struct UserProfile: Identifiable, Codable, Equatable {
         role = try container.decode(UserRole.self, forKey: .role)
         city = try container.decode(String.self, forKey: .city)
         venueAddress = try container.decodeIfPresent(String.self, forKey: .venueAddress)
+        venuePlaceName = try container.decodeIfPresent(String.self, forKey: .venuePlaceName)
+        venueLatitude = try container.decodeIfPresent(Double.self, forKey: .venueLatitude)
+        venueLongitude = try container.decodeIfPresent(Double.self, forKey: .venueLongitude)
         bio = try container.decodeIfPresent(String.self, forKey: .bio)
         avatarURL = try container.decodeIfPresent(URL.self, forKey: .avatarURL)
         genres = try container.decodeIfPresent([String].self, forKey: .genres) ?? []
@@ -211,6 +226,10 @@ extension UserProfile {
 
     var venueAddressText: String {
         venueAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    var venuePlaceNameText: String {
+        venuePlaceName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     var renderIdentity: String {

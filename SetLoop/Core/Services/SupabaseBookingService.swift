@@ -50,7 +50,7 @@ final class SupabaseBookingService: BookingRemoteServicing {
         let applications: [Application] = try await apiClient.request(
             path: "/rest/v1/applications",
             method: .post,
-            body: [application],
+            body: [ApplicationCreateRequest(application: application)],
             authToken: try await accessToken(),
             additionalHeaders: ["Prefer": "return=representation"]
         )
@@ -84,11 +84,9 @@ final class SupabaseBookingService: BookingRemoteServicing {
 
     func deleteApplication(applicationID: UUID) async throws {
         let _: EmptyResponse = try await apiClient.request(
-            path: "/rest/v1/applications",
-            queryItems: [
-                URLQueryItem(name: "id", value: "eq.\(applicationID.bookingRestID)")
-            ],
-            method: .delete,
+            path: "/rest/v1/rpc/delete_historical_application",
+            method: .post,
+            body: HistoricalApplicationDeleteRequest(applicationID: applicationID),
             authToken: try await accessToken(),
             additionalHeaders: ["Prefer": "return=minimal"]
         )
@@ -124,6 +122,27 @@ final class SupabaseBookingService: BookingRemoteServicing {
     }
 }
 
+private struct ApplicationCreateRequest: Encodable {
+    let id: UUID
+    let gigID: UUID
+    let applicantUserID: UUID
+    let message: String
+
+    init(application: Application) {
+        id = application.id
+        gigID = application.gigID
+        applicantUserID = application.applicantUserID
+        message = application.message
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case gigID = "gig_id"
+        case applicantUserID = "applicant_user_id"
+        case message
+    }
+}
+
 private struct BookingStatusUpdateRequest: Encodable {
     let status: ApplicationStatus
     let updatedAt: Date
@@ -131,6 +150,14 @@ private struct BookingStatusUpdateRequest: Encodable {
     enum CodingKeys: String, CodingKey {
         case status
         case updatedAt = "updated_at"
+    }
+}
+
+private struct HistoricalApplicationDeleteRequest: Encodable {
+    let applicationID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case applicationID = "target_application_id"
     }
 }
 

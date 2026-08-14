@@ -14,6 +14,7 @@ struct GigDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 DetailHeroView(
                     symbolName: "calendar.badge.clock",
+                    imageURL: viewModel.imageDisplayURL,
                     badge: viewModel.statusText,
                     title: viewModel.gig.title,
                     subtitle: viewModel.venueDisplayName,
@@ -47,6 +48,9 @@ struct GigDetailView: View {
         .sheet(isPresented: $showsRequestSheet) {
             ContactRequestSheet(
                 gigTitle: viewModel.gig.title,
+                venueName: viewModel.venueDisplayName,
+                performanceDate: viewModel.gig.performanceDate,
+                budgetText: viewModel.budgetText,
                 message: $message
             ) {
                 Task {
@@ -111,6 +115,7 @@ struct VenueDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 DetailHeroView(
                     symbolName: "music.mic",
+                    imageURL: viewModel.venue.imageURL,
                     badge: viewModel.verificationText,
                     title: viewModel.venue.name,
                     subtitle: viewModel.venue.address,
@@ -158,31 +163,48 @@ struct MissingDetailView: View {
 private struct ContactRequestSheet: View {
     @Environment(\.dismiss) private var dismiss
     let gigTitle: String
+    let venueName: String
+    let performanceDate: Date
+    let budgetText: String
     @Binding var message: String
     let onSubmit: () -> Void
+    @FocusState private var isMessageFocused: Bool
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(gigTitle)
-                    .font(.headline)
-                    .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    ContactRequestSummaryCard(
+                        gigTitle: gigTitle,
+                        venueName: venueName,
+                        performanceDate: performanceDate,
+                        budgetText: budgetText
+                    )
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Mensaje")
-                        .font(.subheadline.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Mensaje")
+                                .font(.subheadline.weight(.semibold))
 
-                    TextEditor(text: $message)
-                        .frame(minHeight: 160)
-                        .padding(8)
-                        .scrollContentBackground(.hidden)
-                        .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                            Spacer()
+
+                            Text("\(message.trimmingCharacters(in: .whitespacesAndNewlines).count)/240")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        TextEditor(text: $message)
+                            .focused($isMessageFocused)
+                            .frame(height: 150)
+                            .padding(10)
+                            .scrollContentBackground(.hidden)
+                            .background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
                 }
-
-                Spacer()
+                .padding(16)
             }
-            .padding(16)
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Solicitar contacto")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -194,19 +216,78 @@ private struct ContactRequestSheet: View {
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Enviar") {
+                        isMessageFocused = false
                         onSubmit()
                         dismiss()
                     }
-                    .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .fontWeight(.semibold)
+                    .disabled(trimmedMessage.isEmpty || trimmedMessage.count > 240)
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.height(430), .large])
+        .presentationCornerRadius(28)
+        .presentationDragIndicator(.visible)
+    }
+
+    private var trimmedMessage: String {
+        message.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private struct ContactRequestSummaryCard: View {
+    let gigTitle: String
+    let venueName: String
+    let performanceDate: Date
+    let budgetText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "paperplane.fill")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Color.accentColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(gigTitle)
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(venueName)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 14) {
+                Label(
+                    performanceDate.formatted(date: .abbreviated, time: .shortened),
+                    systemImage: "calendar"
+                )
+
+                Label(budgetText, systemImage: "banknote")
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
 private struct DetailHeroView: View {
     let symbolName: String
+    let imageURL: URL?
     let badge: String
     let title: String
     let subtitle: String
@@ -215,15 +296,7 @@ private struct DetailHeroView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.tertiarySystemBackground))
-                        .frame(width: 72, height: 72)
-
-                    Image(systemName: symbolName)
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
+                DetailHeroImageView(imageURL: imageURL, symbolName: symbolName)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(badge)
@@ -249,6 +322,50 @@ private struct DetailHeroView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct DetailHeroImageView: View {
+    let imageURL: URL?
+    let symbolName: String
+
+    var body: some View {
+        Group {
+            if let imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .empty:
+                        placeholder(showsProgress: true)
+                    case .failure:
+                        placeholder(showsProgress: false)
+                    @unknown default:
+                        placeholder(showsProgress: false)
+                    }
+                }
+            } else {
+                placeholder(showsProgress: false)
+            }
+        }
+        .frame(width: 72, height: 72)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func placeholder(showsProgress: Bool) -> some View {
+        ZStack {
+            Color(.tertiarySystemBackground)
+
+            if showsProgress {
+                ProgressView()
+            } else {
+                Image(systemName: symbolName)
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

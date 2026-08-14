@@ -94,6 +94,7 @@ struct MainTabView: View {
                 currentProfile: currentProfile,
                 applicationStore: applicationStore,
                 gigStore: gigStore,
+                venueStore: venueStore,
                 targetApplicationID: $selectedApplicationID
             )
                 .tabItem {

@@ -539,10 +539,6 @@ private struct GigEditorView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    TextField("Ciudad", text: $viewModel.city)
-                        .textInputAutocapitalization(.words)
-                        .focused($focusedField, equals: .city)
-
                     DatePicker(
                         "Fecha",
                         selection: $viewModel.performanceDate,
@@ -563,12 +559,6 @@ private struct GigEditorView: View {
                         TextField("Presupuesto max", text: $viewModel.budgetMaxText)
                             .keyboardType(.numberPad)
                             .focused($focusedField, equals: .budgetMax)
-                    }
-
-                    Picker("Estado", selection: $viewModel.status) {
-                        ForEach(GigStatus.allCases) { status in
-                            Text(status.displayName).tag(status)
-                        }
                     }
                 }
 
@@ -700,7 +690,6 @@ private struct GigEditorView: View {
 
 private enum GigEditorField: Hashable {
     case title
-    case city
     case duration
     case budgetMin
     case budgetMax

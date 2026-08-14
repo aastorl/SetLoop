@@ -165,6 +165,7 @@ final class GigStore: ObservableObject {
         let expectedVenueID = venue?.id
         let expectedVenueName = venue?.name ?? profile.displayName
         let expectedCity = venue?.city ?? profile.city
+        let expectedImageURL = venue?.imageURL ?? profile.avatarURL
 
         var didChange = false
 
@@ -183,6 +184,11 @@ final class GigStore: ObservableObject {
 
             if gigs[index].city != expectedCity {
                 gigs[index].city = expectedCity
+                itemDidChange = true
+            }
+
+            if gigs[index].imageURL != expectedImageURL {
+                gigs[index].imageURL = expectedImageURL
                 itemDidChange = true
             }
 

@@ -40,7 +40,17 @@ private extension APIError {
             return "El servidor no devolvio datos. Refresca la pantalla e intentalo de nuevo."
         case .decodingFailed:
             return "No se pudo leer la respuesta del servidor. Refresca la pantalla e intentalo de nuevo."
-        case .requestFailed(let statusCode, _):
+        case .requestFailed(let statusCode, let message):
+            if message.contains("delete_historical_application") {
+                return "Falta aplicar la migracion de borrado historico en Supabase antes de eliminar candidaturas pasadas."
+            }
+
+            if message.contains("venue_place_name")
+                || message.contains("venue_latitude")
+                || message.contains("venue_longitude") {
+                return "Falta aplicar la migracion de ubicacion en Supabase antes de guardar direcciones."
+            }
+
             switch statusCode {
             case 400, 422:
                 return "No se pudo guardar el cambio. Revisa los datos e intentalo de nuevo."

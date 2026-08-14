@@ -29,6 +29,7 @@ struct Application: Identifiable, Codable, Equatable {
     var applicantDisplayName: String // Snapshot del perfil para inbox y avisos mock.
     var applicantRole: UserRole // Evita depender de lookups externos en modo demo.
     var applicantCity: String // Mantiene contexto minimo del candidato.
+    var applicantAvatarURL: URL? // Snapshot visual del perfil que aplica.
     var message: String
     var status: ApplicationStatus
     var createdAt: Date
@@ -41,6 +42,7 @@ struct Application: Identifiable, Codable, Equatable {
         case applicantDisplayName = "applicant_display_name"
         case applicantRole = "applicant_role"
         case applicantCity = "applicant_city"
+        case applicantAvatarURL = "applicant_avatar_url"
         case message
         case status
         case createdAt = "created_at"

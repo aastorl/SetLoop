@@ -69,6 +69,45 @@ struct SetLoopTests {
     }
 
     @MainActor
+    @Test func passwordResetRequestSendsEmailAndShowsConfirmation() async {
+        let authService = RecordingPasswordResetAuthService()
+        let viewModel = AuthViewModel(authService: authService, authMode: .supabase)
+
+        viewModel.email = "  reset@setloop.local  "
+        viewModel.beginPasswordResetRequest()
+
+        #expect(viewModel.passwordResetEmail == "reset@setloop.local")
+
+        await viewModel.requestPasswordReset()
+
+        #expect(authService.requestedPasswordResetEmail == "reset@setloop.local")
+        #expect(viewModel.isPasswordResetRequestPresented == false)
+        #expect(viewModel.passwordResetMessage == "Te enviamos un email para cambiar la contrasena.")
+    }
+
+    @MainActor
+    @Test func passwordRecoveryURLPromptsForNewPasswordAndUpdatesIt() async {
+        let authService = RecordingPasswordResetAuthService()
+        let viewModel = AuthViewModel(authService: authService, authMode: .supabase)
+        let recoveryURL = URL(string: "setloop://password-reset#access_token=recovery-token&type=recovery")!
+
+        let handled = viewModel.handlePasswordRecoveryURL(recoveryURL)
+
+        #expect(handled)
+        #expect(viewModel.isPasswordUpdatePresented)
+
+        viewModel.recoveredPassword = "newpass123"
+        viewModel.recoveredPasswordConfirmation = "newpass123"
+
+        await viewModel.completeRecoveredPasswordUpdate()
+
+        #expect(authService.updatedPasswordAccessToken == "recovery-token")
+        #expect(authService.updatedPassword == "newpass123")
+        #expect(viewModel.isPasswordUpdatePresented == false)
+        #expect(viewModel.passwordResetMessage == "Contrasena actualizada. Ya puedes iniciar sesion.")
+    }
+
+    @MainActor
     @Test func musicianFormationSelectionIsSingleChoice() {
         let profile = UserProfile(
             id: UUID(),
@@ -128,6 +167,127 @@ struct SetLoopTests {
     }
 
     @MainActor
+    @Test func venueAddressSelectionUpdatesProfileDraft() async {
+        let profile = UserProfile(
+            id: UUID(),
+            email: "venue-map@setloop.local",
+            displayName: "Sala Map",
+            role: .venue,
+            city: "",
+            bio: "Programacion semanal.",
+            genres: ["Rock"],
+            instruments: ["House"],
+            venueCapacity: 150
+        )
+
+        let viewModel = ProfileViewModel(
+            profile: profile,
+            mode: .profile,
+            onPersistProfile: { $0 }
+        )
+
+        viewModel.applyVenueAddressSelection(
+            VenueAddressSelection(
+                placeName: "Sala Map",
+                address: "Calle Luna 12, Madrid",
+                city: "Madrid",
+                latitude: 40.4168,
+                longitude: -3.7038
+            )
+        )
+
+        #expect(viewModel.city == "Madrid")
+        #expect(viewModel.canSave)
+
+        let savedProfile = await viewModel.save()
+
+        #expect(savedProfile?.venueAddress == "Calle Luna 12, Madrid")
+        #expect(savedProfile?.venuePlaceName == "Sala Map")
+        #expect(savedProfile?.venueLatitude == 40.4168)
+        #expect(savedProfile?.venueLongitude == -3.7038)
+
+        viewModel.updateVenueAddressManually("Calle Manual 4")
+
+        #expect(viewModel.venuePlaceName.isEmpty)
+        #expect(viewModel.venueLatitude == nil)
+        #expect(viewModel.venueLongitude == nil)
+    }
+
+    @MainActor
+    @Test func profileModeAllowsSavingAddressBeforeVenueProfileIsComplete() async {
+        let profile = UserProfile(
+            id: UUID(),
+            email: "venue-partial-save@setloop.local",
+            displayName: "Sala Parcial",
+            role: .venue,
+            city: "Malaga",
+            bio: nil,
+            genres: [],
+            instruments: [],
+            venueCapacity: nil
+        )
+
+        let viewModel = ProfileViewModel(
+            profile: profile,
+            mode: .profile,
+            onPersistProfile: { $0 }
+        )
+
+        viewModel.applyVenueAddressSelection(
+            VenueAddressSelection(
+                placeName: "Sala Parcial",
+                address: "Calle Postigo de Arance, 16, Malaga",
+                city: "Malaga",
+                latitude: 36.723,
+                longitude: -4.425
+            )
+        )
+
+        #expect(viewModel.showsPrimaryActionButton)
+        #expect(viewModel.canSave)
+
+        let savedProfile = await viewModel.save()
+
+        #expect(savedProfile?.venueAddress == "Calle Postigo de Arance, 16, Malaga")
+        #expect(savedProfile?.venuePlaceName == "Sala Parcial")
+    }
+
+    @MainActor
+    @Test func nonVenueProfilesIgnoreAndClearVenueLocation() async {
+        let profile = UserProfile(
+            id: UUID(),
+            email: "musician-location@setloop.local",
+            displayName: "Banda Sin Direccion",
+            role: .musician,
+            city: "Malaga",
+            venueAddress: "Calle Privada 1",
+            venuePlaceName: "Direccion heredada",
+            venueLatitude: 36.72,
+            venueLongitude: -4.42,
+            bio: "Proyecto en directo.",
+            genres: ["Rock"],
+            instruments: ["Banda"]
+        )
+
+        let viewModel = ProfileViewModel(
+            profile: profile,
+            mode: .profile,
+            onPersistProfile: { $0 }
+        )
+
+        #expect(viewModel.showsPrimaryActionButton == false)
+
+        viewModel.bio = "Proyecto en directo actualizado."
+
+        let savedProfile = await viewModel.save()
+
+        #expect(savedProfile?.venueAddress == nil)
+        #expect(savedProfile?.venuePlaceName == nil)
+        #expect(savedProfile?.venueLatitude == nil)
+        #expect(savedProfile?.venueLongitude == nil)
+    }
+
+    @MainActor
     @Test func venueStoreSyncsVenueFromProfile() {
         let suiteName = "SetLoopTests.VenueStore.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
@@ -140,6 +300,9 @@ struct SetLoopTests {
             role: .venue,
             city: "Sevilla",
             venueAddress: "Calle Feria 12",
+            venuePlaceName: "Sala Prisma",
+            venueLatitude: 37.3891,
+            venueLongitude: -5.9845,
             bio: "Programacion de club y directos.",
             genres: ["Indie", "Rock"],
             instruments: ["House", "Disco"],
@@ -153,6 +316,8 @@ struct SetLoopTests {
         #expect(venue?.city == "Sevilla")
         #expect(venue?.address == "Calle Feria 12")
         #expect(venue?.capacity == 260)
+        #expect(venue?.latitude == 37.3891)
+        #expect(venue?.longitude == -5.9845)
         #expect(venue?.genres == ["Disco", "House", "Indie", "Rock"])
         #expect(venueStore.venue(for: profile.id)?.description == "Programacion de club y directos.")
     }
@@ -708,6 +873,112 @@ struct SetLoopTests {
     }
 
     @MainActor
+    @Test func exploreCardsUseVenueImageWhenGigHasNoImage() throws {
+        let venueImageURL = URL(string: "https://example.com/venue.jpg")!
+        let hostProfile = setLoopTestProfile(role: .venue, city: "Madrid", displayName: "Sala Imagen")
+        let venue = Venue(
+            id: UUID(),
+            ownerID: hostProfile.id,
+            name: "Sala Imagen Principal",
+            city: "Madrid",
+            address: "Calle Imagen 1",
+            capacity: 120,
+            description: "Local con imagen.",
+            genres: ["Indie"],
+            imageURL: venueImageURL,
+            latitude: nil,
+            longitude: nil,
+            isVerified: false,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        let gig = setLoopTestGig(
+            hostProfile: hostProfile,
+            title: "Fecha con local",
+            roleNeeded: .musician,
+            performanceDate: Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date(),
+            status: .open
+        )
+
+        let card = try #require(ExploreCardFactory.makeCards(gigs: [gig], venues: [venue]).first)
+
+        #expect(card.imageURL == venueImageURL)
+        #expect(card.subtitle == hostProfile.displayName)
+    }
+
+    @MainActor
+    @Test func bookingItemsExposeProfileImagesForVenueAndApplicantPerspectives() throws {
+        let suiteName = "SetLoopTests.BookingProfileImages.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        let venueImageURL = URL(string: "https://example.com/venue-booking.jpg")!
+        let applicantImageURL = URL(string: "https://example.com/applicant.jpg")!
+        let hostProfile = setLoopTestProfile(role: .venue, city: "Madrid", displayName: "Sala Fotos")
+        var applicantProfile = setLoopTestProfile(role: .musician, city: "Madrid", displayName: "Banda Fotos")
+        applicantProfile.avatarURL = applicantImageURL
+
+        let venue = Venue(
+            id: UUID(),
+            ownerID: hostProfile.id,
+            name: hostProfile.displayName,
+            city: hostProfile.city,
+            address: "Calle Fotos 12",
+            capacity: 180,
+            description: "Local de prueba.",
+            genres: ["Indie"],
+            imageURL: venueImageURL,
+            latitude: nil,
+            longitude: nil,
+            isVerified: false,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        var gig = setLoopTestGig(
+            hostProfile: hostProfile,
+            title: "Fecha con fotos",
+            roleNeeded: .musician,
+            performanceDate: Calendar.current.date(byAdding: .day, value: 9, to: Date()) ?? Date(),
+            status: .open
+        )
+        gig.venueID = venue.id
+
+        let gigStore = GigStore(userDefaults: userDefaults, seedGigs: [gig])
+        let venueStore = VenueStore(userDefaults: userDefaults, seedVenues: [venue])
+        let notificationStore = NotificationStore(userDefaults: userDefaults)
+        let applicationStore = ApplicationStore(
+            gigStore: gigStore,
+            notificationStore: notificationStore,
+            userDefaults: userDefaults
+        )
+        let application = applicationStore.createApplication(
+            gigID: gig.id,
+            applicantProfile: applicantProfile,
+            message: "Nos interesa esta fecha."
+        )
+
+        let venueViewModel = BookingViewModel(
+            applicationStore: applicationStore,
+            currentProfile: hostProfile,
+            gigStore: gigStore,
+            venueStore: venueStore
+        )
+        let applicantViewModel = BookingViewModel(
+            applicationStore: applicationStore,
+            currentProfile: applicantProfile,
+            gigStore: gigStore,
+            venueStore: venueStore
+        )
+
+        let incomingItem = try #require(venueViewModel.item(applicationID: application.id))
+        let sentItem = try #require(applicantViewModel.item(applicationID: application.id))
+
+        #expect(application.applicantAvatarURL == applicantImageURL)
+        #expect(incomingItem.counterpartImageURL == applicantImageURL)
+        #expect(sentItem.counterpartImageURL == venueImageURL)
+    }
+
+    @MainActor
     @Test func venueCalendarGroupsSameDayGigsAndCountsPendingApplications() throws {
         let suiteName = "SetLoopTests.VenueCalendar.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
@@ -956,6 +1227,76 @@ struct SetLoopTests {
     }
 
     @MainActor
+    @Test func applicantCanDeleteAcceptedApplicationAfterPerformanceDay() async throws {
+        let suiteName = "SetLoopTests.DeleteHistoricalApplication.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        let calendar = Calendar.current
+        let applicantProfile = setLoopTestProfile(
+            role: .musician,
+            city: "Madrid",
+            displayName: "Banda Historica",
+            genres: ["Indie"],
+            instruments: ["Banda"]
+        )
+        let hostProfile = setLoopTestProfile(role: .venue, city: "Madrid", displayName: "Sala Historica")
+        let pastDate = try #require(calendar.date(byAdding: .day, value: -3, to: Date()))
+        let futureDate = try #require(calendar.date(byAdding: .day, value: 3, to: Date()))
+        let pastGig = setLoopTestGig(
+            hostProfile: hostProfile,
+            title: "Fecha pasada",
+            roleNeeded: .musician,
+            performanceDate: pastDate,
+            status: .booked
+        )
+        let futureGig = setLoopTestGig(
+            hostProfile: hostProfile,
+            title: "Fecha futura",
+            roleNeeded: .musician,
+            performanceDate: futureDate,
+            status: .booked
+        )
+        let gigStore = GigStore(userDefaults: userDefaults, seedGigs: [pastGig, futureGig])
+        let notificationStore = NotificationStore(userDefaults: userDefaults)
+        let applicationStore = ApplicationStore(
+            gigStore: gigStore,
+            notificationStore: notificationStore,
+            userDefaults: userDefaults
+        )
+        let pastApplication = applicationStore.createApplication(
+            gigID: pastGig.id,
+            applicantProfile: applicantProfile,
+            message: "Fecha ya realizada."
+        )
+        _ = applicationStore.updateStatus(applicationID: pastApplication.id, status: .accepted)
+        let futureApplication = applicationStore.createApplication(
+            gigID: futureGig.id,
+            applicantProfile: applicantProfile,
+            message: "Fecha por realizar."
+        )
+        _ = applicationStore.updateStatus(applicationID: futureApplication.id, status: .accepted)
+
+        let viewModel = BookingViewModel(
+            applicationStore: applicationStore,
+            currentProfile: applicantProfile,
+            gigStore: gigStore,
+            calendar: calendar
+        )
+        let pastItem = try #require(viewModel.item(applicationID: pastApplication.id))
+        let futureItem = try #require(viewModel.item(applicationID: futureApplication.id))
+
+        #expect(viewModel.canDelete(pastItem))
+        #expect(viewModel.canDelete(futureItem) == false)
+
+        await viewModel.deleteAsync(pastItem)
+
+        #expect(viewModel.errorMessage == nil)
+        #expect(applicationStore.applications.contains { $0.id == pastApplication.id } == false)
+        #expect(applicationStore.applications.contains { $0.id == futureApplication.id })
+    }
+
+    @MainActor
     @Test func notificationsViewModelTracksReadStateAndDelete() async throws {
         let suiteName = "SetLoopTests.NotificationsViewModel.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
@@ -1117,6 +1458,58 @@ private final class FailingVenueGigRemoteService: VenueGigRemoteServicing {
     func updateGigStatus(gigID: UUID, status: GigStatus) async throws -> Gig {
         throw TestLoadError.unavailable
     }
+}
+
+@MainActor
+private final class RecordingPasswordResetAuthService: AuthServicing {
+    private(set) var requestedPasswordResetEmail: String?
+    private(set) var updatedPasswordAccessToken: String?
+    private(set) var updatedPassword: String?
+
+    func restoreSession() async throws -> UserProfile? {
+        nil
+    }
+
+    func signUp(
+        email: String,
+        password: String,
+        displayName: String,
+        city: String,
+        role: UserRole
+    ) async throws -> UserProfile {
+        UserProfile(
+            id: UUID(),
+            email: email,
+            displayName: displayName,
+            role: role,
+            city: city
+        )
+    }
+
+    func signIn(email: String, password: String) async throws -> UserProfile {
+        UserProfile(
+            id: UUID(),
+            email: email,
+            displayName: "Test",
+            role: .musician,
+            city: "Madrid"
+        )
+    }
+
+    func requestPasswordReset(email: String) async throws {
+        requestedPasswordResetEmail = email
+    }
+
+    func updatePassword(accessToken: String, newPassword: String) async throws {
+        updatedPasswordAccessToken = accessToken
+        updatedPassword = newPassword
+    }
+
+    func updateProfile(_ profile: UserProfile) async throws -> UserProfile {
+        profile
+    }
+
+    func signOut() async throws {}
 }
 
 private final class StubBookingRemoteService: BookingRemoteServicing {

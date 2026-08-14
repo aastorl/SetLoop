@@ -19,6 +19,7 @@ final class BookingViewModel: ObservableObject {
     private let currentProfile: UserProfile
     private let applicationStore: ApplicationStore
     private let gigStore: GigStore
+    private let venueStore: VenueStore?
     private let calendar: Calendar
     private var cancellables = Set<AnyCancellable>()
 
@@ -26,11 +27,13 @@ final class BookingViewModel: ObservableObject {
         applicationStore: ApplicationStore,
         currentProfile: UserProfile,
         gigStore: GigStore,
+        venueStore: VenueStore? = nil,
         calendar: Calendar = .current
     ) {
         self.currentProfile = currentProfile
         self.applicationStore = applicationStore
         self.gigStore = gigStore
+        self.venueStore = venueStore
         self.calendar = calendar
         let today = calendar.startOfDay(for: Date())
         self.visibleMonth = today
@@ -45,6 +48,12 @@ final class BookingViewModel: ObservableObject {
             .store(in: &cancellables)
 
         gigStore.$gigs
+            .sink { [weak self] _ in
+                self?.reloadItems()
+            }
+            .store(in: &cancellables)
+
+        venueStore?.$venues
             .sink { [weak self] _ in
                 self?.reloadItems()
             }
@@ -94,11 +103,22 @@ final class BookingViewModel: ObservableObject {
     }
 
     var calendarMonthTitle: String {
-        visibleMonth.formatted(.dateTime.month(.wide).year())
+        visibleMonth.formatted(
+            .dateTime
+                .month(.wide)
+                .year()
+                .locale(Locale(identifier: "es_ES"))
+        )
     }
 
     var selectedDayTitle: String {
-        selectedDate.formatted(.dateTime.weekday(.wide).day().month(.wide))
+        selectedDate.formatted(
+            .dateTime
+                .weekday(.wide)
+                .day()
+                .month(.wide)
+                .locale(Locale(identifier: "es_ES"))
+        )
     }
 
     var calendarItems: [BookingEntryItem] {
@@ -459,6 +479,20 @@ final class BookingViewModel: ObservableObject {
         kind: BookingEntryKind
     ) -> BookingEntryItem {
         let gig = gigStore.gig(id: application.gigID)
+        let venue: Venue?
+        if let gig {
+            venue = venueForGig(gig)
+        } else {
+            venue = nil
+        }
+        let counterpartImageURL: URL?
+
+        switch kind {
+        case .receivedApplication:
+            counterpartImageURL = application.applicantAvatarURL
+        case .sentApplication:
+            counterpartImageURL = gig?.imageURL ?? venue?.imageURL
+        }
 
         return BookingEntryItem(
             id: application.id,
@@ -470,10 +504,19 @@ final class BookingViewModel: ObservableObject {
             counterpartDisplayName: kind == .receivedApplication ? application.applicantDisplayName : nil,
             counterpartRole: kind == .receivedApplication ? application.applicantRole : nil,
             counterpartCity: kind == .receivedApplication ? application.applicantCity : nil,
+            counterpartImageURL: counterpartImageURL,
             message: application.message,
             status: application.status,
             createdAt: application.createdAt
         )
+    }
+
+    private func venueForGig(_ gig: Gig) -> Venue? {
+        if let venueID = gig.venueID, let venue = venueStore?.venue(id: venueID) {
+            return venue
+        }
+
+        return venueStore?.venue(for: gig.hostUserID)
     }
 }
 
@@ -598,6 +641,7 @@ struct BookingEntryItem: Identifiable, Equatable {
     let counterpartDisplayName: String?
     let counterpartRole: UserRole?
     let counterpartCity: String?
+    let counterpartImageURL: URL?
     let message: String
     let status: ApplicationStatus
     let createdAt: Date

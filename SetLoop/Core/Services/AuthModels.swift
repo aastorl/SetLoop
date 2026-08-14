@@ -122,6 +122,14 @@ struct SignInRequest: Encodable {
     let password: String
 }
 
+struct PasswordRecoveryRequest: Encodable {
+    let email: String
+}
+
+struct PasswordUpdateRequest: Encodable {
+    let password: String
+}
+
 struct RefreshTokenRequest: Encodable {
     let refreshToken: String
 

@@ -531,7 +531,7 @@ final class GigEditorViewModel: ObservableObject {
                 requiredGenres: selectedGenres,
                 description: gigDescription.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 status: status,
-                imageURL: existingGig?.imageURL,
+                imageURL: associatedVenue?.imageURL ?? currentProfile.avatarURL ?? existingGig?.imageURL,
                 createdAt: existingGig?.createdAt ?? now,
                 updatedAt: now
             )

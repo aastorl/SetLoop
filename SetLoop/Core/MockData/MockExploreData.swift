@@ -227,7 +227,8 @@ enum MockExploreData {
         gigs: [Gig]
     ) -> [ExploreCardItem] {
         ExploreCardFactory.makeCards(
-            gigs: gigs
+            gigs: gigs,
+            venues: venues
         )
     }
 

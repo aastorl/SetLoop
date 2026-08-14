@@ -4,6 +4,8 @@ protocol AuthServicing {
     func restoreSession() async throws -> UserProfile?
     func signUp(email: String, password: String, displayName: String, city: String, role: UserRole) async throws -> UserProfile
     func signIn(email: String, password: String) async throws -> UserProfile
+    func requestPasswordReset(email: String) async throws
+    func updatePassword(accessToken: String, newPassword: String) async throws
     func updateProfile(_ profile: UserProfile) async throws -> UserProfile
     func signOut() async throws
 }
@@ -78,6 +80,24 @@ final class AuthService: AuthServicing {
 
         try sessionStore.save(session)
         return try await fetchOrCreateProfile(session: session, authUser: response.user)
+    }
+
+    func requestPasswordReset(email: String) async throws {
+        let _: EmptyResponse = try await apiClient.request(
+            path: "/auth/v1/recover",
+            queryItems: [URLQueryItem(name: "redirect_to", value: "setloop://password-reset")],
+            method: .post,
+            body: PasswordRecoveryRequest(email: email)
+        )
+    }
+
+    func updatePassword(accessToken: String, newPassword: String) async throws {
+        let _: SupabaseAuthUser = try await apiClient.request(
+            path: "/auth/v1/user",
+            method: .put,
+            body: PasswordUpdateRequest(password: newPassword),
+            authToken: accessToken
+        )
     }
 
     func signOut() async throws {

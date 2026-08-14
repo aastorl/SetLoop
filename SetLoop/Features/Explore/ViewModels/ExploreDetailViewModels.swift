@@ -47,6 +47,10 @@ final class GigDetailViewModel: ObservableObject {
         venue?.name ?? gig.venueName ?? "Local por confirmar"
     }
 
+    var imageDisplayURL: URL? {
+        gig.imageURL ?? venue?.imageURL
+    }
+
     var budgetText: String {
         switch (gig.budgetMin, gig.budgetMax) {
         case (.some(let min), .some(let max)):

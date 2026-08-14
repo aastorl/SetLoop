@@ -73,6 +73,26 @@ final class MockAuthService: AuthServicing {
         return profile
     }
 
+    func requestPasswordReset(email: String) async throws {
+        let normalizedEmail = normalize(email)
+        guard accounts.contains(where: { normalize($0.profile.email) == normalizedEmail }) else {
+            return
+        }
+    }
+
+    func updatePassword(accessToken: String, newPassword: String) async throws {
+        guard let currentUserID,
+              let accountIndex = accounts.firstIndex(where: { $0.profile.id == currentUserID }) else {
+            throw MockAuthError.profileMissing
+        }
+
+        accounts[accountIndex] = MockAccount(
+            profile: accounts[accountIndex].profile,
+            password: newPassword
+        )
+        try persist(accounts: accounts, currentUserID: currentUserID)
+    }
+
     func signOut() async throws {
         currentUserID = nil
         userDefaults.removeObject(forKey: currentUserIDKey)
