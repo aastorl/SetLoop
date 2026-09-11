@@ -632,6 +632,61 @@ struct SetLoopTests {
     }
 
     @MainActor
+    @Test func notificationDestinationFocusesPendingVenueApplication() throws {
+        let suiteName = "SetLoopTests.NotificationApplicationRoute.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+
+        let hostProfile = setLoopTestProfile(role: .venue, city: "Madrid", displayName: "Sala Aviso")
+        let applicantProfile = setLoopTestProfile(role: .musician, city: "Madrid", displayName: "Banda Aviso")
+        let gig = setLoopTestGig(
+            hostProfile: hostProfile,
+            title: "Fecha con aviso",
+            roleNeeded: .musician,
+            performanceDate: setLoopTestDate(year: 2026, month: 11, day: 18, hour: 21)
+        )
+        let gigStore = GigStore(userDefaults: userDefaults, seedGigs: [gig])
+        let venueStore = VenueStore(userDefaults: userDefaults, seedVenues: [])
+        let notificationStore = NotificationStore(userDefaults: userDefaults)
+        let applicationStore = ApplicationStore(
+            gigStore: gigStore,
+            notificationStore: notificationStore,
+            userDefaults: userDefaults
+        )
+        let application = applicationStore.createApplication(
+            gigID: gig.id,
+            applicantProfile: applicantProfile,
+            message: "Me interesa tocar esta fecha."
+        )
+        let notification = notificationStore.add(
+            userID: hostProfile.id,
+            type: .applicationReceived,
+            title: "Nueva candidatura",
+            body: "Banda Aviso se postulo a Fecha con aviso.",
+            relatedGigID: gig.id,
+            relatedApplicationID: application.id
+        )
+        let notificationItem = NotificationItem(notification: notification)
+        let viewModel = BookingViewModel(
+            applicationStore: applicationStore,
+            currentProfile: hostProfile,
+            gigStore: gigStore,
+            venueStore: venueStore
+        )
+
+        viewModel.venueFilter = .managed
+        #expect(viewModel.hasItems == false)
+
+        let routedApplicationID = try #require(notificationItem.relatedApplicationID)
+        let bookingItem = try #require(viewModel.item(applicationID: routedApplicationID))
+
+        viewModel.prepareForPresentation(bookingItem)
+
+        #expect(viewModel.venueFilter == .pending)
+        #expect(viewModel.sections.first?.items.map(\.id) == [application.id])
+    }
+
+    @MainActor
     @Test func venueManagedApplicationsHidePastEventsAutomatically() {
         let suiteName = "SetLoopTests.BookingDelete.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
